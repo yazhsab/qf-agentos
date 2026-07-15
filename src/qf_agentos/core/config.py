@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # so a single unauthenticated request cannot drive a huge classical solve.
     api_max_inventory: int = Field(default=2000, gt=0)
 
+    # API authentication: a comma-separated set of accepted X-API-Key values.
+    # If empty, the API is OPEN (development mode) — a startup warning is logged.
+    api_keys: str = Field(default="", description="Comma-separated API keys; empty = open.")
+    api_rate_limit_per_minute: int = Field(default=60, gt=0)
+
     # Credentials (never logged; loaded only when the matching backend runs)
     ibm_token: SecretStr | None = None
     ibm_instance: str | None = None
@@ -57,6 +62,12 @@ class Settings(BaseSettings):
 
     def has_dwave_credentials(self) -> bool:
         return self.dwave_token is not None
+
+    def api_key_set(self) -> frozenset[str]:
+        return frozenset(k.strip() for k in self.api_keys.split(",") if k.strip())
+
+    def auth_required(self) -> bool:
+        return bool(self.api_key_set())
 
 
 @lru_cache(maxsize=1)

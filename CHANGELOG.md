@@ -7,6 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **REST API hardening**: optional API-key authentication (`X-API-Key`, enabled by
+  setting `QF_API_KEYS`) on `/solve` and the run registry, plus per-client rate
+  limiting on `/solve` (`QF_API_RATE_LIMIT_PER_MINUTE`). Open in dev mode with a
+  startup warning when no keys are configured.
 - **Second quantum technique + task type: quantum-kernel classification**
   (`fraud_detection`). An honest experimentation harness — strong classical
   baselines (logistic regression + RBF kernel-ridge) vs a ZZ fidelity **quantum
