@@ -1,0 +1,32 @@
+name: collateral-optimizer
+version: 0.1.0
+summary: >
+  Minimise collateral posting cost subject to coverage, HQLA, and concentration
+  limits. Compares a classical MILP optimum against a QAOA-solved QUBO on a
+  reduced research instance, and reports whether quantum computing helps.
+problem: collateral_allocation
+inputs:
+  - asset_inventory        # list of postable securities (id, issuer, counterparty, value, haircut, cost_bps, hqla)
+  - required_collateral    # post-haircut collateral value to deliver
+  - eligibility_rules      # per-security eligibility flags
+  - concentration_limits   # per-attribute caps, e.g. issuer / counterparty
+  - minimum_hqla           # HQLA floor within the posted pool
+methods:
+  classical:
+    - highs_lp_relaxation
+    - highs_binary_milp
+    - qubo_exact_optimum
+    - simulated_annealing
+  quantum:
+    - qaoa_sim               # qiskit statevector (default)
+    - qaoa_pennylane         # pennylane alternative simulator
+    - qaoa_ibm               # requires credentials (L3-gated)
+    - dwave_hybrid           # requires credentials (L3-gated)
+verification:
+  - constraint_feasibility
+  - objective_recomputation
+  - qubo_ground_state_gap
+  - quantum_contribution
+autonomy:
+  simulator: L2
+  paid_qpu: L3

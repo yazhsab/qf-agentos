@@ -1,0 +1,15 @@
+services:
+  api:
+    build: .
+    image: qf-agentos:latest
+    ports:
+      - "8000:8000"
+    environment:
+      QF_LOG_LEVEL: INFO
+      QF_LOG_FORMAT: json
+      # Backend credentials (optional; leave unset to run classical + simulator only).
+      # QF_IBM_TOKEN: ${QF_IBM_TOKEN:-}
+      # QF_DWAVE_TOKEN: ${QF_DWAVE_TOKEN:-}
+    volumes:
+      - ./evidence:/app/evidence
+    restart: unless-stopped

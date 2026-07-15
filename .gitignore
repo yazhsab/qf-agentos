@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+# Evidence bundles are run artifacts; keep the directory, ignore generated runs
+evidence/*/
+!evidence/.gitkeep
+.DS_Store

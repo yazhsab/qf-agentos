@@ -1,0 +1,18 @@
+QF-AgentOS
+Copyright 2026 QF-AgentOS contributors
+
+This product includes software developed as an open-source agentic operating
+system for quantum finance.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License in the LICENSE file or at http://www.apache.org/licenses/LICENSE-2.0.
+
+This software is decision-support research software. It is not a licensed
+financial advisor and its outputs must not be used as the sole basis for
+financial decisions. It does not place trades, move funds, or take any
+autonomous financial action.
+
+Third-party components (optional, used under their respective licenses) include
+Qiskit, PennyLane, and the D-Wave Ocean SDK. These are not distributed with this
+project and remain the property of their respective authors.

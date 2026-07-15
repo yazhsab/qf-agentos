@@ -1,0 +1,31 @@
+# Demonstrates quantum ABSTENTION: policy disallows quantum backends, so the
+# planner declines quantum entirely and the classical MILP result stands.
+#
+#   qf-agent solve examples/abstention-demo.yaml
+#   -> FINAL DECISION: QUANTUM NOT FEASIBLE ON PRESENT HARDWARE
+
+problem: collateral_allocation
+
+objective:
+  type: minimise_collateral_cost
+
+constraints:
+  required_collateral: 4000000
+  minimum_hqla: 1000000
+  concentration:
+    issuer: 0.60
+
+execution_policy:
+  compare_classical: true
+  allow_quantum_annealing: false   # no annealer
+  allow_gate_model: false          # no gate model  -> planner abstains from quantum
+  max_qpu_budget_usd: 0
+  max_effective_qubits: 12
+  autonomy_level: L2
+  seed: 7
+
+inventory:
+  - { id: G1, issuer: US_TREASURY, counterparty: CP_A, market_value: 3000000, haircut: 0.01, cost_bps: 6,  hqla: true }
+  - { id: G2, issuer: UK_GILT,     counterparty: CP_B, market_value: 2500000, haircut: 0.02, cost_bps: 7,  hqla: true }
+  - { id: C1, issuer: CORP_A,      counterparty: CP_A, market_value: 1800000, haircut: 0.08, cost_bps: 15, hqla: false }
+  - { id: C2, issuer: CORP_B,      counterparty: CP_B, market_value: 1600000, haircut: 0.10, cost_bps: 18, hqla: false }

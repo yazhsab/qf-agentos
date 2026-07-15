@@ -1,0 +1,41 @@
+# QF-AgentOS — collateral-allocation problem.
+#
+#   qf-agent solve examples/collateral-allocation.yaml
+#
+# Minimise the cost of posting collateral while delivering the required
+# post-haircut value and respecting HQLA and concentration limits.
+
+problem: collateral_allocation
+
+objective:
+  type: minimise_collateral_cost
+
+constraints:
+  required_collateral: 8000000     # post-haircut collateral value to deliver
+  minimum_hqla: 2000000            # HQLA floor within the posted pool
+  concentration:
+    issuer: 0.40                   # no single issuer > 40% of the posted pool
+    counterparty: 0.60             # no single counterparty > 60% of the posted pool
+
+execution_policy:
+  compare_classical: true
+  allow_quantum_annealing: true
+  allow_gate_model: true
+  max_qpu_budget_usd: 50
+  max_effective_qubits: 12         # 8 securities + 4 coverage slack bits
+  autonomy_level: L2               # simulators auto-run; paid QPU needs L3 + approval
+  qaoa_reps: 2
+  shots: 4096
+  seed: 7
+
+inventory:
+  - { id: G_UST_1, issuer: US_TREASURY, counterparty: CP_A, market_value: 3000000, haircut: 0.010, cost_bps: 6,  hqla: true }
+  - { id: G_UST_2, issuer: US_TREASURY, counterparty: CP_B, market_value: 2500000, haircut: 0.010, cost_bps: 6,  hqla: true }
+  - { id: G_GILT,  issuer: UK_GILT,     counterparty: CP_A, market_value: 2000000, haircut: 0.020, cost_bps: 7,  hqla: true }
+  - { id: G_BUND,  issuer: BUND,        counterparty: CP_B, market_value: 2200000, haircut: 0.015, cost_bps: 7,  hqla: true }
+  - { id: C_A1,    issuer: CORP_A,      counterparty: CP_A, market_value: 1800000, haircut: 0.080, cost_bps: 15, hqla: false }
+  - { id: C_A2,    issuer: CORP_A,      counterparty: CP_B, market_value: 1500000, haircut: 0.090, cost_bps: 16, hqla: false }
+  - { id: C_B1,    issuer: CORP_B,      counterparty: CP_A, market_value: 1600000, haircut: 0.100, cost_bps: 18, hqla: false }
+  - { id: C_B2,    issuer: CORP_B,      counterparty: CP_B, market_value: 1200000, haircut: 0.120, cost_bps: 20, hqla: false }
+  - { id: E_1,     issuer: CORP_A,      counterparty: CP_A, market_value: 1000000, haircut: 0.150, cost_bps: 25, hqla: false }
+  - { id: E_2,     issuer: CORP_B,      counterparty: CP_B, market_value: 900000,  haircut: 0.140, cost_bps: 24, hqla: false }

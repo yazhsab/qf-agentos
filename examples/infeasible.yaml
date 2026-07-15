@@ -1,0 +1,25 @@
+# Demonstrates honest INFEASIBILITY handling: the required collateral exceeds the
+# total post-haircut coverage of the eligible inventory, so no feasible solution
+# exists. The auditor reports this clearly and the CLI exits with a non-zero code.
+#
+#   qf-agent solve examples/infeasible.yaml    # exits 4
+#   -> FINAL DECISION: CLASSICAL PREFERRED, recommended: none (problem is infeasible)
+
+problem: collateral_allocation
+
+objective:
+  type: minimise_collateral_cost
+
+constraints:
+  required_collateral: 50000000     # far more than the inventory can cover
+  minimum_hqla: 0
+
+execution_policy:
+  allow_gate_model: false
+  max_effective_qubits: 12
+  autonomy_level: L2
+  seed: 7
+
+inventory:
+  - { id: G1, issuer: US_TREASURY, counterparty: CP_A, market_value: 3000000, haircut: 0.01, cost_bps: 6, hqla: true }
+  - { id: G2, issuer: UK_GILT,     counterparty: CP_B, market_value: 2000000, haircut: 0.02, cost_bps: 7, hqla: true }

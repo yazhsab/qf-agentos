@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: "QF-AgentOS: An Agentic Operating System for Quantum Finance"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - name: "QF-AgentOS contributors"
+repository-code: "https://github.com/qf-agentos/qf-agentos"
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-07-15"
+keywords:
+  - quantum computing
+  - quantitative finance
+  - collateral optimisation
+  - QAOA
+  - QUBO
+  - multi-agent systems
+abstract: >
+  QF-AgentOS is an open-source, provider-neutral platform that takes a financial
+  optimisation problem, formulates it, builds strong classical baselines,
+  identifies a quantum-compatible sub-problem, runs gate-model simulation (and,
+  where authorised, real QPUs), deterministically verifies feasibility and
+  quantum contribution, and honestly reports whether quantum technology should be
+  used. Abstention and classical preference are first-class outcomes.
