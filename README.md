@@ -106,6 +106,10 @@ qf-agent serve --host 0.0.0.0 --port 8000
 | `POST /solve` | run the pipeline on a spec → decision + evidence |
 | `GET /runs`, `GET /runs/{id}` | the experiment registry |
 
+Set `QF_API_KEYS` (comma-separated) to require an `X-API-Key` header on `/solve`
+and the run registry; `/solve` is also rate-limited (`QF_API_RATE_LIMIT_PER_MINUTE`).
+With no keys set the API is open (development mode) and logs a startup warning.
+
 ## Docker
 
 ```bash

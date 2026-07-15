@@ -85,3 +85,62 @@ def test_runs_endpoint_returns_list():
 def test_run_not_found():
     r = client.get("/runs/does-not-exist")
     assert r.status_code == 404
+
+
+def test_healthz_open_without_key():
+    assert client.get("/healthz").status_code == 200
+
+
+def test_solve_requires_api_key_when_configured(monkeypatch):
+    from qf_agentos.api import _reset_rate_limiter
+    from qf_agentos.core.config import reset_settings_cache
+
+    monkeypatch.setenv("QF_API_KEYS", "secret-key-1,secret-key-2")
+    reset_settings_cache()
+    _reset_rate_limiter()
+    try:
+        payload = {
+            "spec": _spec_payload(required=4_000_000, allow_gate_model=False),
+            "persist": False,
+        }
+        assert client.post("/solve", json=payload).status_code == 401  # no key
+        assert (
+            client.post("/solve", json=payload, headers={"X-API-Key": "nope"}).status_code == 401
+        )  # wrong key
+        r = client.post("/solve", json=payload, headers={"X-API-Key": "secret-key-1"})
+        assert r.status_code == 200  # valid key
+    finally:
+        reset_settings_cache()
+        _reset_rate_limiter()
+
+
+def test_runs_requires_api_key_when_configured(monkeypatch):
+    from qf_agentos.core.config import reset_settings_cache
+
+    monkeypatch.setenv("QF_API_KEYS", "k")
+    reset_settings_cache()
+    try:
+        assert client.get("/runs").status_code == 401
+        assert client.get("/runs", headers={"X-API-Key": "k"}).status_code == 200
+    finally:
+        reset_settings_cache()
+
+
+def test_rate_limit_exceeded(monkeypatch):
+    from qf_agentos.api import _reset_rate_limiter
+    from qf_agentos.core.config import reset_settings_cache
+
+    monkeypatch.setenv("QF_API_RATE_LIMIT_PER_MINUTE", "2")
+    reset_settings_cache()
+    _reset_rate_limiter()
+    try:
+        payload = {
+            "spec": _spec_payload(required=4_000_000, allow_gate_model=False),
+            "persist": False,
+        }
+        assert client.post("/solve", json=payload).status_code == 200
+        assert client.post("/solve", json=payload).status_code == 200
+        assert client.post("/solve", json=payload).status_code == 429  # 3rd exceeds limit=2
+    finally:
+        reset_settings_cache()
+        _reset_rate_limiter()
