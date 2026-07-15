@@ -26,6 +26,7 @@ _RESULT_FIELDS = [
     "instance_qubo_exact",
     "instance_sa",
     "instance_qaoa",
+    "instance_qaoa_noisy",
 ]
 
 

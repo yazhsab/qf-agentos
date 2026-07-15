@@ -7,6 +7,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Noisy simulation + readout error mitigation** — completes the execution ladder.
+  When `execution_policy.noisy_simulation` is on, the optimised QAOA circuit is also
+  sampled under a depolarising + readout noise model (qiskit-aer) and readout-error
+  mitigated (tensored inverse confusion matrix); the evidence bundle records ideal vs
+  noisy vs mitigated, making the "is quantum feasible on present hardware?" verdict
+  empirical. Off by default, so the ideal comparison and evidence digest are unchanged.
 - **Warm-start QAOA** (Egger et al. 2021): the QAOA initial state and mixer are
   biased toward a classical relaxation (LP for collateral, max-entropy assignment
   for routing) instead of `|+⟩`. Replaces the previous "roadmap" placeholder.

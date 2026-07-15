@@ -92,7 +92,13 @@ def verification_agent(ctx: RunContext) -> str:
         reports["classical_milp"] = domain.verify_full(spec, st.classical_milp)
 
     if instance is not None:
-        for res in (st.instance_milp, st.instance_qubo_exact, st.instance_sa, st.instance_qaoa):
+        for res in (
+            st.instance_milp,
+            st.instance_qubo_exact,
+            st.instance_sa,
+            st.instance_qaoa,
+            st.instance_qaoa_noisy,
+        ):
             if res is None:
                 continue
             reports[res.method] = domain.verify_instance(instance, res)

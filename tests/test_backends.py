@@ -109,3 +109,14 @@ def test_warm_start_qaoa_reaches_ground_state(qubo):
     raw = run_qaoa(qubo, reps=2, shots=2048, seed=7, warm_start=ws)
     assert raw["warm_started"] is True
     assert raw["best_energy"] >= ee - 1e-6  # QAOA can equal but never beat exact
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_noisy_qaoa_returns_noise_and_mitigation_fields(qubo):
+    from qf_agentos.backends.quantum import run_qaoa
+
+    raw = run_qaoa(qubo, reps=1, shots=1024, seed=7, noisy=True, mitigate=True)
+    assert "noisy_best_energy" in raw
+    assert raw["noise_model"]["readout"] == 0.03
+    assert "mitigated_best_energy" in raw  # readout mitigation applied

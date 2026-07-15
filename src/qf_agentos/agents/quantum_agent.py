@@ -76,6 +76,9 @@ def execution_agent(ctx: RunContext) -> str:
         shots=pol.shots,
         reps=pol.qaoa_reps,
         warm_start=tuple(warm_start) if warm_start is not None else None,
+        noisy=pol.noisy_simulation,
+        noise_two_qubit_error=pol.noise_two_qubit_error,
+        readout_error=pol.readout_error,
     )
     ran: list[str] = []
 
@@ -175,6 +178,24 @@ def execution_agent(ctx: RunContext) -> str:
                 metadata=slim,
             )
             ran.append("qaoa_sim")
+
+            # Optional noisy-simulation pass (present-hardware feasibility).
+            if isinstance(raw, dict) and "noisy_best_bits" in raw:
+                noisy_meta = {
+                    "noise_model": raw.get("noise_model"),
+                    "ideal_energy": sol.energy,
+                    "noisy_energy": raw.get("noisy_best_energy"),
+                    "mitigated_energy": raw.get("mitigated_best_energy"),
+                }
+                ctx.state.instance_qaoa_noisy = domain.evaluate_bits(
+                    instance,
+                    raw["noisy_best_bits"],
+                    method="qaoa_noisy_sim",
+                    kind="quantum",
+                    backend="noisy_statevector_sim",
+                    metadata=noisy_meta,
+                )
+                ran.append("qaoa_noisy_sim")
         else:
             ctx.warn(f"QAOA not executed: {auth.reason}")
     else:

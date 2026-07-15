@@ -69,3 +69,15 @@ def test_quantum_never_silently_beats_exact(small_spec):
     inst_milp = ctx.state.instance_milp
     if qaoa and qaoa.feasible and qaoa.objective is not None and inst_milp.objective is not None:
         assert qaoa.objective >= inst_milp.objective - 1e-6
+
+
+@pytest.mark.slow
+def test_noisy_simulation_completes_the_ladder(spec_factory):
+    spec = spec_factory(required=4_000_000)
+    spec.execution_policy.noisy_simulation = True
+    ctx = solve(spec)
+    assert ctx.state.instance_qaoa_noisy is not None
+    assert "qaoa_noisy_sim" in ctx.state.verification
+    assert ctx.state.instance_qaoa_noisy.metadata.get("noise_model") is not None
+    assert "qaoa_noisy_sim" in ctx.state.bundle.manifest["results"]
+    assert not ctx.state.errors

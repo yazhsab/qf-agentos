@@ -52,6 +52,7 @@ class PipelineState:
     instance_qubo_exact: SolveResult | None = None
     instance_sa: SolveResult | None = None
     instance_qaoa: SolveResult | None = None
+    instance_qaoa_noisy: SolveResult | None = None
     qaoa_raw: QaoaResult | None = None
     qubo_exact_energy: float | None = None
 

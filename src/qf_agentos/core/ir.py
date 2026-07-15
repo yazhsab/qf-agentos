@@ -224,6 +224,13 @@ class ExecutionPolicy(BaseModel):
     shots: int = Field(default=4096, ge=128)
     seed: int = 7
 
+    # Noisy-simulation pass (completes the execution ladder). Off by default so
+    # the ideal-vs-classical comparison and evidence digest are unchanged; when
+    # on, the report shows how the QAOA result degrades on present-day hardware.
+    noisy_simulation: bool = False
+    noise_two_qubit_error: float = Field(default=0.02, ge=0, le=0.5)
+    readout_error: float = Field(default=0.03, ge=0, lt=0.5)
+
 
 class ProblemSpec(BaseModel):
     """Top-level, validated financial problem specification.

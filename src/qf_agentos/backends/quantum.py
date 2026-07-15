@@ -147,6 +147,80 @@ def _sample_statevector(isa: Any, params: np.ndarray, shots: int, seed: int) -> 
     return Counter(keys[i].replace(" ", "") for i in draws)
 
 
+def _readout_mitigate(counts: dict[str, int], p: float, n: int, shots: int) -> Counter[str]:
+    """Tensored inverse-confusion-matrix readout mitigation (symmetric error p)."""
+    if not 0 < p < 0.5 or n > 16 or shots == 0:
+        return Counter(counts)
+    vec = np.zeros(2**n)
+    for key, c in counts.items():
+        vec[int(key.replace(" ", ""), 2)] += c
+    total = vec.sum() or 1.0
+    vec /= total
+    a_inv = np.array([[1 - p, -p], [-p, 1 - p]]) / (1.0 - 2.0 * p)
+    tensor = vec.reshape([2] * n)
+    for q in range(n):
+        tensor = np.moveaxis(np.tensordot(a_inv, tensor, axes=([1], [q])), 0, q)
+    mvec = np.clip(tensor.reshape(2**n), 0.0, None)
+    mvec = mvec / (mvec.sum() or 1.0)
+    return Counter(
+        {format(i, f"0{n}b"): int(round(mvec[i] * shots)) for i in range(2**n) if mvec[i] > 1e-6}
+    )
+
+
+def _noisy_evaluate(
+    qubo: Qubo,
+    isa: Any,
+    params: np.ndarray,
+    *,
+    shots: int,
+    seed: int,
+    two_qubit_error: float,
+    readout_error: float,
+    mitigate: bool,
+) -> dict[str, Any]:
+    """Sample the optimised circuit under a depolarising + readout noise model,
+    then optionally apply readout error mitigation. Requires qiskit-aer."""
+    from qiskit import transpile
+    from qiskit_aer import AerSimulator
+    from qiskit_aer.noise import NoiseModel, ReadoutError, depolarizing_error
+
+    nm = NoiseModel()
+    nm.add_all_qubit_quantum_error(depolarizing_error(two_qubit_error, 2), ["cx"])
+    nm.add_all_qubit_quantum_error(depolarizing_error(two_qubit_error / 5.0, 1), ["sx", "x"])
+    nm.add_all_qubit_readout_error(
+        ReadoutError([[1 - readout_error, readout_error], [readout_error, 1 - readout_error]])
+    )
+    sim = AerSimulator(noise_model=nm)
+    circ = isa.assign_parameters(params).copy()
+    circ.measure_all()
+    tqc = transpile(
+        circ,
+        sim,
+        basis_gates=["cx", "rz", "sx", "x", "id"],
+        optimization_level=0,
+        seed_transpiler=int(seed),
+    )
+    result = sim.run(tqc, shots=shots, seed_simulator=int(seed)).result()
+    noisy_counts = {k.replace(" ", ""): v for k, v in result.get_counts().items()}
+
+    n_best, n_energy, _ = _rank_bitstrings(qubo, Counter(noisy_counts))
+    out: dict[str, Any] = {
+        "noisy_best_bits": n_best,
+        "noisy_best_energy": n_energy,
+        "noisy_shots": int(sum(noisy_counts.values())),
+        "noise_model": {"two_qubit_depolarising": two_qubit_error, "readout": readout_error},
+    }
+    if mitigate:
+        mit = _readout_mitigate(
+            noisy_counts, readout_error, qubo.n, int(sum(noisy_counts.values()))
+        )
+        if mit:
+            m_best, m_energy, _ = _rank_bitstrings(qubo, mit)
+            out["mitigated_best_bits"] = m_best
+            out["mitigated_best_energy"] = m_energy
+    return out
+
+
 def _rank_bitstrings(
     qubo: Qubo, counts: Counter[str]
 ) -> tuple[np.ndarray, float, dict[str, float]]:
@@ -169,8 +243,17 @@ def run_qaoa(
     restarts: int = 4,
     maxiter: int = 150,
     warm_start: list[float] | None = None,
+    noisy: bool = False,
+    two_qubit_error: float = 0.02,
+    readout_error: float = 0.03,
+    mitigate: bool = True,
 ) -> dict[str, Any]:
-    """Run QAOA end-to-end on the statevector simulator. Returns a result dict."""
+    """Run QAOA end-to-end on the statevector simulator. Returns a result dict.
+
+    When ``noisy`` is set, the optimised circuit is additionally sampled under a
+    depolarising + readout noise model and (optionally) readout-error-mitigated,
+    so the report can show how the result degrades on present-day hardware.
+    """
     from qiskit import transpile
 
     n = qubo.n
@@ -204,6 +287,19 @@ def run_qaoa(
     )
     two_qubit_depth = tqc.depth(lambda inst: inst.operation.num_qubits == 2)
 
+    noisy_fields: dict[str, Any] = {}
+    if noisy:
+        noisy_fields = _noisy_evaluate(
+            qubo,
+            opt["isa"],
+            opt["best_params"],
+            shots=shots,
+            seed=seed,
+            two_qubit_error=two_qubit_error,
+            readout_error=readout_error,
+            mitigate=mitigate,
+        )
+
     return {
         "degenerate": False,
         "best_bits": best_bits,
@@ -212,6 +308,7 @@ def run_qaoa(
         "warm_started": warm_start is not None,
         "n_qubits": n,
         "reps": reps,
+        **noisy_fields,
         "num_parameters": opt["num_parameters"],
         "optimizer": "COBYLA",
         "optimizer_evals": opt["optimizer_evals"],
