@@ -11,17 +11,20 @@ from __future__ import annotations
 from ..backends.registry import discover_capabilities
 from ..core.artifacts import HardwarePlan
 from ..core.workflow import RunContext
-from ..finance.collateral import SLACK_BITS_DEFAULT, build_qubo, reduce_to_instance
+from ..finance import get_domain
+
+_SLACK_BITS = 4
 
 
 def hardware_planner_agent(ctx: RunContext) -> str:
     spec = ctx.spec
     pol = spec.execution_policy
     statevector_limit = ctx.settings.statevector_qubit_limit
+    domain = get_domain(spec.problem)
 
-    instance = reduce_to_instance(spec, pol.max_effective_qubits, slack_bits=SLACK_BITS_DEFAULT)
-    slack = max(0, min(SLACK_BITS_DEFAULT, pol.max_effective_qubits - instance.n_qubits))
-    qubo = build_qubo(instance, slack_bits=slack)
+    instance = domain.reduce_to_instance(spec, pol.max_effective_qubits)
+    slack = max(0, min(_SLACK_BITS, pol.max_effective_qubits - instance.n_qubits))
+    qubo = domain.build_qubo(instance, slack_bits=slack)
     ctx.state.instance = instance
     ctx.state.qubo = qubo
 
@@ -75,13 +78,13 @@ def hardware_planner_agent(ctx: RunContext) -> str:
         capabilities=caps,
         encoding_losses=qubo.encoding_losses,
         instance_provenance=instance.provenance,
-        instance_target_collateral=instance.required_collateral,
+        instance_target=instance.target,
     )
 
     if abstain:
         return f"Hardware plan: ABSTAIN from quantum — {'; '.join(reasons)}. Use classical result."
     return (
-        f"Hardware plan: {total_qubits}-qubit instance ({instance.n_qubits} securities + "
+        f"Hardware plan: {total_qubits}-qubit instance ({instance.n_qubits} decisions + "
         f"{qubo.slack_bits} slack) on {target}; est. 2-qubit depth {est_two_qubit_depth}, "
         f"est. cost ${0.0:.2f}. Real QPU gated (L3 + approval)."
     )

@@ -63,6 +63,19 @@ def test_solve_rejects_oversized_inventory(monkeypatch):
         reset_settings_cache()
 
 
+def test_solve_rejects_oversized_routing(monkeypatch):
+    from qf_agentos.core.config import reset_settings_cache
+    from qf_test_utils import make_routing_spec
+
+    monkeypatch.setenv("QF_API_MAX_INVENTORY", "3")
+    reset_settings_cache()
+    try:
+        payload = {"spec": make_routing_spec(allow_gate_model=False).model_dump(mode="json")}
+        assert client.post("/solve", json=payload).status_code == 413  # 6 transactions > 3
+    finally:
+        reset_settings_cache()
+
+
 def test_runs_endpoint_returns_list():
     r = client.get("/runs")
     assert r.status_code == 200

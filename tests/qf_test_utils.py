@@ -100,3 +100,94 @@ def make_spec(
             "inventory": default_inventory() if inventory is None else inventory,
         }
     )
+
+
+def default_routes() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "R_VISA",
+            "cost_bps": 18,
+            "fixed_fee": 0.05,
+            "approval_rate": 0.94,
+            "fraud_bps": 4,
+            "latency_ms": 120,
+            "capacity": 3,
+            "network": "VISA",
+        },
+        {
+            "id": "R_MC",
+            "cost_bps": 20,
+            "fixed_fee": 0.04,
+            "approval_rate": 0.93,
+            "fraud_bps": 5,
+            "latency_ms": 140,
+            "capacity": 3,
+            "network": "MC",
+        },
+        {
+            "id": "R_ACQ",
+            "cost_bps": 12,
+            "fixed_fee": 0.10,
+            "approval_rate": 0.88,
+            "fraud_bps": 9,
+            "latency_ms": 90,
+            "capacity": 2,
+            "network": "ACQ",
+        },
+        {
+            "id": "R_ALT",
+            "cost_bps": 9,
+            "fixed_fee": 0.02,
+            "approval_rate": 0.82,
+            "fraud_bps": 14,
+            "latency_ms": 300,
+            "capacity": 5,
+            "network": "ALT",
+        },
+    ]
+
+
+def default_transactions() -> list[dict[str, Any]]:
+    return [
+        {"id": "T1", "amount": 250_000},
+        {"id": "T2", "amount": 180_000},
+        {"id": "T3", "amount": 90_000, "eligible_routes": ["R_VISA", "R_MC"]},
+        {"id": "T4", "amount": 60_000},
+        {"id": "T5", "amount": 30_000},
+        {"id": "T6", "amount": 15_000},
+    ]
+
+
+def make_routing_spec(
+    *,
+    routing: dict[str, Any] | None = None,
+    max_qubits: int = 12,
+    autonomy: str = "L2",
+    allow_gate_model: bool = True,
+    routes: list[dict[str, Any]] | None = None,
+    transactions: list[dict[str, Any]] | None = None,
+    seed: int = 7,
+) -> ProblemSpec:
+    return ProblemSpec.model_validate(
+        {
+            "problem": "payment_routing",
+            "objective": {"type": "minimise_routing_cost"},
+            "routing": routing
+            if routing is not None
+            else {
+                "decline_penalty_bps": 120,
+                "network_concentration": 0.6,
+                "min_overall_approval": 0.9,
+            },
+            "execution_policy": {
+                "max_effective_qubits": max_qubits,
+                "autonomy_level": autonomy,
+                "allow_gate_model": allow_gate_model,
+                "qaoa_reps": 1,
+                "shots": 1024,
+                "seed": seed,
+            },
+            "routes": default_routes() if routes is None else routes,
+            "transactions": default_transactions() if transactions is None else transactions,
+        }
+    )

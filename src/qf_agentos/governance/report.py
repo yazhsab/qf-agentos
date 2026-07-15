@@ -135,12 +135,9 @@ def _render_report(ctx: RunContext, manifest: dict[str, Any]) -> str:
 
     if req:
         L.append("## 1. Requirements (Agent 1)\n")
-        L.append(f"- Eligible securities: **{req.n_eligible}** of {req.n_securities}")
-        L.append(f"- Required collateral: **{req.required_collateral:,.0f}**")
-        L.append(
-            f"- Available coverage: **{req.available_coverage:,.0f}** "
-            f"(headroom {req.coverage_headroom:,.0f})"
-        )
+        L.append(f"- {req.summary}")
+        for name, value in req.metrics.items():
+            L.append(f"- {name}: **{value:,.2f}**")
         if req.discovered_gaps:
             L.append("- Discovered constraint gaps:")
             L += [f"  - {g}" for g in req.discovered_gaps]

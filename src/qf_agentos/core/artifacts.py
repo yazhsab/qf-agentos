@@ -13,16 +13,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RequirementsReport(BaseModel):
+    """Domain-agnostic understanding of the problem.
+
+    ``metrics`` holds domain-specific numbers (e.g. required_collateral, or
+    transaction/route counts) so the report renders uniformly across families.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    n_securities: int
-    n_eligible: int
-    required_collateral: float
-    available_coverage: float
-    coverage_headroom: float
-    trivially_feasible_upper_bound: bool
-    concentration_attrs: list[str] = Field(default_factory=list)
-    minimum_hqla: float = 0.0
+    problem: str
+    summary: str
+    metrics: dict[str, float] = Field(default_factory=dict)
+    feasible_upper_bound: bool = True
     discovered_gaps: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     autonomy_level: str = "L2"
@@ -69,7 +71,7 @@ class HardwarePlan(BaseModel):
     capabilities: list[BackendCapability] = Field(default_factory=list)
     encoding_losses: list[str] = Field(default_factory=list)
     instance_provenance: dict[str, Any] = Field(default_factory=dict)
-    instance_target_collateral: float
+    instance_target: float  # representative target magnitude (domain-defined)
 
 
 class QuantumSelection(BaseModel):

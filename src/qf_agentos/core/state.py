@@ -21,10 +21,11 @@ from .artifacts import (
     RequirementsReport,
     StepError,
 )
+from .domain import ProblemInstance
 from .result import AuditDecision, SolveResult, VerificationReport
 
 if TYPE_CHECKING:  # avoid a runtime core -> finance dependency
-    from ..finance.collateral import Qubo, ResearchInstance
+    from ..finance.collateral import Qubo
 
 
 @dataclass
@@ -41,7 +42,7 @@ class PipelineState:
     integrality_gap: float | None = None
 
     # Agents 4-5 — reduction + planning
-    instance: ResearchInstance | None = None
+    instance: ProblemInstance | None = None
     qubo: Qubo | None = None
     hardware_plan: HardwarePlan | None = None
     quantum_selection: QuantumSelection | None = None

@@ -73,7 +73,7 @@ def _ctx(
         estimated_two_qubit_depth=1,
         estimated_cost_usd=0.0,
         real_qpu="gated",
-        instance_target_collateral=100.0,
+        instance_target=100.0,
     )
     if not abstain and q_obj is not None:
         ctx.state.instance_milp = _result("instance_milp", "classical", c_feasible, c_obj)

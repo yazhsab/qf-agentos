@@ -7,6 +7,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Second problem family: payment-routing optimisation** (generalized assignment
+  problem) — route transactions across candidate routes to minimise expected cost
+  (processing + fixed fee + fraud + latency + expected decline) subject to
+  capacity, network diversification, and an approval floor. Ships the
+  `payment-router` skill and an example spec. Reuses the entire agent pipeline.
+- **Problem-domain abstraction** (`core/domain.py::ProblemDomain`): the agent
+  pipeline is now problem-agnostic and delegates all problem-specific work to a
+  domain; new families plug in without touching the agents. The IR is a
+  discriminated spec (collateral / payment_routing) with per-family validation.
+- API size guard now covers the routing path (transactions, not just inventory).
+
+### Added (earlier)
 - **Typed pipeline state** (`core/state.py`, `core/artifacts.py`) replacing the
   stringly-typed inter-agent bus; the whole contract is now mypy-checked.
 - **Backend abstraction**: `QuboSolver` protocol + registry, with real

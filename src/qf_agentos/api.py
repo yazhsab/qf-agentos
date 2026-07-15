@@ -84,12 +84,14 @@ def run_manifest(run_id: str) -> dict[str, Any]:
 @app.post("/solve", response_model=SolveResponse)
 def solve(request: SolveRequest) -> SolveResponse:
     settings = get_settings()
-    n = len(request.spec.inventory)
+    # Guard every problem family: bound the largest driver of solve cost
+    # (securities for collateral, transactions for routing) over the sync API.
+    n = max(len(request.spec.inventory), len(request.spec.transactions))
     if n > settings.api_max_inventory:
         raise HTTPException(
             status_code=413,
             detail=(
-                f"inventory has {n} securities; the API limit is "
+                f"problem size {n} exceeds the API limit of "
                 f"{settings.api_max_inventory}. Use the CLI/SDK for larger problems."
             ),
         )

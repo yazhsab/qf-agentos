@@ -2,10 +2,11 @@
 
 The Quantum Algorithm agent picks a technique from problem structure rather than
 reflexively reaching for QAOA. The Execution agent runs the instance-level ladder
-that makes the eventual comparison fair, selecting solvers from the backend
-registry and enforcing the policy engine before any (simulated or paid) run:
+that makes the eventual comparison fair, selecting QUBO solvers from the backend
+registry, delegating decode+check to the problem domain, and enforcing the policy
+engine before any (simulated or paid) run:
 
-    instance MILP (classical optimum, all constraints)
+    instance classical optimum (all constraints)
         -> QUBO exact ground state (reference for quantum contribution)
         -> simulated annealing (strong classical heuristic)
         -> QAOA on the statevector simulator (authorised at L2)
@@ -21,10 +22,8 @@ from ..backends.base import QuboRunConfig
 from ..backends.registry import get_solver
 from ..core.artifacts import QaoaResult, QuantumSelection, TranspileMetrics
 from ..core.policy import Action
-from ..core.result import Allocation, SolveResult
 from ..core.workflow import RunContext
-from ..finance.collateral import solve_instance_milp
-from .util import evaluate_instance_alloc, evaluate_instance_bits
+from ..finance import get_domain
 
 # Maps the planner's abstract target to a concrete registry backend name.
 _TARGET_TO_BACKEND = {"gate_model_statevector_sim": "qaoa_sim"}
@@ -68,29 +67,12 @@ def execution_agent(ctx: RunContext) -> str:
     if instance is None or qubo is None or plan is None:
         return "Execution skipped: no instance/QUBO/plan available."
 
+    domain = get_domain(spec.problem)
     config = QuboRunConfig(seed=pol.seed, shots=pol.shots, reps=pol.qaoa_reps)
     ran: list[str] = []
 
     # 1. Classical optimum on the SAME instance (all constraints) — fair comparator.
-    t0 = time.perf_counter()
-    milp = solve_instance_milp(instance)
-    dt = time.perf_counter() - t0
-    if milp.feasible and milp.allocation is not None:
-        ctx.state.instance_milp = evaluate_instance_alloc(
-            "instance_milp", "classical", "scipy/HiGHS", instance, milp.allocation, runtime_s=dt
-        )
-    else:
-        ctx.state.instance_milp = SolveResult(
-            method="instance_milp",
-            kind="classical",
-            backend="scipy/HiGHS",
-            scope="research_instance",
-            feasible=False,
-            objective=None,
-            allocation=Allocation(x={}),
-            runtime_s=dt,
-            metadata={"status": milp.status},
-        )
+    ctx.state.instance_milp = domain.solve_instance_classical(instance)
     ran.append("instance_milp")
 
     # 2. QUBO exact ground state — reference for the quantum-contribution audit.
@@ -99,12 +81,12 @@ def execution_agent(ctx: RunContext) -> str:
         t0 = time.perf_counter()
         sol = solver.solve(qubo, config)
         dt = time.perf_counter() - t0
-        ctx.state.instance_qubo_exact = evaluate_instance_bits(
-            solver.name,
-            solver.kind,
-            "bruteforce",
+        ctx.state.instance_qubo_exact = domain.evaluate_bits(
             instance,
             sol.best_bits,
+            method=solver.name,
+            kind=solver.kind,
+            backend="bruteforce",
             runtime_s=dt,
             metadata=sol.metadata,
         )
@@ -117,12 +99,12 @@ def execution_agent(ctx: RunContext) -> str:
         t0 = time.perf_counter()
         sol = solver.solve(qubo, config)
         dt = time.perf_counter() - t0
-        ctx.state.instance_sa = evaluate_instance_bits(
-            solver.name,
-            solver.kind,
-            "cpu",
+        ctx.state.instance_sa = domain.evaluate_bits(
             instance,
             sol.best_bits,
+            method=solver.name,
+            kind=solver.kind,
+            backend="cpu",
             runtime_s=dt,
             metadata=sol.metadata,
         )
@@ -173,12 +155,12 @@ def execution_agent(ctx: RunContext) -> str:
                 )
             }
             slim["qubo_energy"] = sol.energy
-            ctx.state.instance_qaoa = evaluate_instance_bits(
-                solver.name,
-                solver.kind,
-                "gate_model_statevector_sim",
+            ctx.state.instance_qaoa = domain.evaluate_bits(
                 instance,
                 sol.best_bits,
+                method=solver.name,
+                kind=solver.kind,
+                backend="gate_model_statevector_sim",
                 runtime_s=dt,
                 qpu_time_s=sol.qpu_time_s,
                 cost_usd=sol.cost_usd,
@@ -196,4 +178,4 @@ def execution_agent(ctx: RunContext) -> str:
         if milp_res and milp_res.objective is not None
         else "infeasible"
     )
-    return f"Executed {len(ran)} method(s) on the instance: {', '.join(ran)}. Instance MILP cost: {milp_txt}."
+    return f"Executed {len(ran)} method(s) on the instance: {', '.join(ran)}. Instance optimum: {milp_txt}."

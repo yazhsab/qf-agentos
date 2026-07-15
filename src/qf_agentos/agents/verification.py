@@ -16,47 +16,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.artifacts import QaoaResult, ReproducibilityInfo
-from ..core.ir import Security
-from ..core.result import SolveResult, VerificationReport
+from ..core.domain import ProblemInstance
+from ..core.result import VerificationReport
 from ..core.workflow import RunContext
-from ..finance.collateral import Qubo, ResearchInstance, check_constraints, qubo_energy
-
-
-def _verify_solution(
-    result: SolveResult,
-    securities: list[Security],
-    required: float,
-    minimum_hqla: float,
-    concentration: dict[str, float],
-) -> VerificationReport:
-    if result.allocation is None:
-        return VerificationReport(
-            method=result.method,
-            scope=result.scope,
-            feasible=False,
-            recomputed_objective=None,
-            objective_matches_solver=(result.objective is None),
-            notes=["No allocation to verify."],
-        )
-    feasible, obj, checks = check_constraints(
-        securities, result.allocation, required, minimum_hqla, concentration
-    )
-    matches = result.objective is None or abs(obj - result.objective) <= 1e-6 * max(1.0, abs(obj))
-    notes: list[str] = []
-    if not matches:
-        notes.append(
-            f"Solver reported objective {result.objective} but independent recomputation "
-            f"gives {obj:.4f}."
-        )
-    return VerificationReport(
-        method=result.method,
-        scope=result.scope,
-        feasible=feasible,
-        recomputed_objective=obj,
-        objective_matches_solver=matches,
-        checks=checks,
-        notes=notes,
-    )
+from ..finance import get_domain
+from ..finance.collateral import Qubo, qubo_energy
 
 
 def _key_to_bits(key: str, n: int) -> NDArray[np.int_]:
@@ -118,31 +82,19 @@ def _quantum_contribution(
 
 def verification_agent(ctx: RunContext) -> str:
     spec = ctx.spec
-    cn = spec.constraints
     st = ctx.state
-    instance: ResearchInstance | None = st.instance
+    domain = get_domain(spec.problem)
+    instance: ProblemInstance | None = st.instance
     reports: dict[str, VerificationReport] = {}
 
     if st.classical_milp is not None:
-        reports["classical_milp"] = _verify_solution(
-            st.classical_milp,
-            spec.eligible_inventory,
-            cn.required_collateral,
-            cn.minimum_hqla,
-            cn.concentration,
-        )
+        reports["classical_milp"] = domain.verify_full(spec, st.classical_milp)
 
     if instance is not None:
         for res in (st.instance_milp, st.instance_qubo_exact, st.instance_sa, st.instance_qaoa):
             if res is None:
                 continue
-            reports[res.method] = _verify_solution(
-                res,
-                instance.securities,
-                instance.required_collateral,
-                instance.minimum_hqla,
-                instance.concentration,
-            )
+            reports[res.method] = domain.verify_instance(instance, res)
 
     if st.qaoa_raw is not None and not st.qaoa_raw.degenerate and st.qubo is not None:
         contrib = _quantum_contribution(

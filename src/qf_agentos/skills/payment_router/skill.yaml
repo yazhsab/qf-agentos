@@ -1,0 +1,35 @@
+name: payment-router
+version: 0.1.0
+summary: >
+  Route payment transactions across candidate routes (acquirer / network /
+  processor paths) to minimise total expected cost — processing + fixed fee +
+  expected fraud + latency + expected decline cost — subject to per-route
+  capacity, network diversification, and an approval-rate floor. Compares a
+  classical MILP (generalized assignment) against a QAOA-solved QUBO on a reduced
+  instance and reports whether quantum computing helps.
+problem: payment_routing
+inputs:
+  - transactions          # id, amount, eligible_routes
+  - routes                # id, cost_bps, fixed_fee, approval_rate, fraud_bps, latency_ms, capacity, network
+  - routing_policy        # decline_penalty_bps, latency_weight, network_concentration, min_overall_approval
+methods:
+  classical:
+    - highs_assignment_lp
+    - highs_assignment_milp    # generalized assignment problem
+    - qubo_exact_optimum
+    - simulated_annealing
+  quantum:
+    - qaoa_sim                 # one-hot assignment QUBO
+    - qaoa_pennylane
+    - qaoa_ibm                 # requires credentials (L3-gated)
+    - dwave_hybrid             # requires credentials (L3-gated)
+verification:
+  - assignment_validity        # exactly one eligible route per transaction
+  - capacity
+  - network_concentration
+  - min_overall_approval
+  - objective_recomputation
+  - quantum_contribution
+autonomy:
+  simulator: L2
+  paid_qpu: L3
