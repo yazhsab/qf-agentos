@@ -9,6 +9,7 @@ from ..core.errors import SpecError
 KNOWN_PROBLEMS: tuple[str, ...] = (
     "collateral_allocation",
     "payment_routing",
+    "settlement_netting",
     "fraud_detection",
 )
 
@@ -23,6 +24,10 @@ def get_domain(problem: str) -> DomainBase:
         from .payment_routing import PaymentRoutingDomain
 
         return PaymentRoutingDomain()
+    if problem == "settlement_netting":
+        from .settlement import SettlementDomain
+
+        return SettlementDomain()
     if problem == "fraud_detection":
         from .fraud import FraudDetectionDomain
 

@@ -29,6 +29,8 @@ MAX_INVENTORY = 100_000
 MAX_TRANSACTIONS = 100_000
 MAX_ROUTES = 1_000
 MAX_SAMPLES = 2_000  # classification: RBF/quantum kernels are O(n^2)+
+MAX_OBLIGATIONS = 100_000
+MAX_PARTICIPANTS = 10_000
 
 
 class AutonomyLevel(str, Enum):
@@ -49,6 +51,7 @@ class ObjectiveType(str, Enum):
     minimise_collateral_cost = "minimise_collateral_cost"
     minimise_routing_cost = "minimise_routing_cost"
     maximise_detection_performance = "maximise_detection_performance"
+    maximise_settled_value = "maximise_settled_value"
 
 
 class Security(BaseModel):
@@ -175,6 +178,68 @@ class RoutingConstraints(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Settlement / liquidity-saving problem family (RTGS gridlock resolution)
+# ---------------------------------------------------------------------------
+
+
+class Participant(BaseModel):
+    """A settlement-system participant with available intraday liquidity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str = ""
+    balance: float = Field(
+        default=0.0,
+        ge=0,
+        description="Available liquidity to fund net outgoing settlements (currency).",
+    )
+
+
+class Obligation(BaseModel):
+    """One queued payment obligation from a payer to a payee."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    payer: str = Field(description="Participant id that owes the payment.")
+    payee: str = Field(description="Participant id that receives the payment.")
+    amount: float = Field(gt=0, description="Payment amount (currency).")
+    priority: int = Field(
+        default=0, ge=0, description="Higher settles first when the objective ties."
+    )
+
+    @model_validator(mode="after")
+    def _distinct_parties(self) -> Obligation:
+        if self.payer == self.payee:
+            raise ValueError(
+                f"Obligation '{self.id}' has the same payer and payee ('{self.payer}')."
+            )
+        return self
+
+
+class SettlementConfig(BaseModel):
+    """Configuration for a liquidity-saving settlement batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    penalty_scale: float = Field(
+        default=8.0, gt=0, description="Base QUBO penalty weight for the liquidity constraints."
+    )
+    min_settled_ratio: float | None = Field(
+        default=None,
+        description="Optional floor on settled value / total queued value, in (0, 1].",
+    )
+
+    @field_validator("min_settled_ratio")
+    @classmethod
+    def _in_unit_interval(cls, v: float | None) -> float | None:
+        if v is not None and not 0.0 < v <= 1.0:
+            raise ValueError(f"must be in (0, 1], got {v}")
+        return v
+
+
+# ---------------------------------------------------------------------------
 # Classification problem family (quantum kernels)
 # ---------------------------------------------------------------------------
 
@@ -254,6 +319,11 @@ class ProblemSpec(BaseModel):
     transactions: list[Transaction] = Field(default_factory=list)
     routes: list[PaymentRoute] = Field(default_factory=list)
 
+    # settlement_netting
+    settlement: SettlementConfig | None = None
+    participants: list[Participant] = Field(default_factory=list)
+    obligations: list[Obligation] = Field(default_factory=list)
+
     # fraud_detection (classification)
     classification: ClassificationConfig | None = None
     features: list[list[float]] = Field(default_factory=list)
@@ -298,6 +368,35 @@ class ProblemSpec(BaseModel):
                         raise ValueError(
                             f"Transaction '{t.id}' lists unknown eligible route '{rid}'."
                         )
+        elif self.problem == "settlement_netting":
+            if self.settlement is None:
+                raise ValueError("settlement_netting requires a 'settlement' block.")
+            if not self.participants:
+                raise ValueError("settlement_netting requires at least one participant.")
+            if not self.obligations:
+                raise ValueError("settlement_netting requires at least one obligation.")
+            if len(self.participants) > MAX_PARTICIPANTS:
+                raise ValueError(
+                    f"Too many participants ({len(self.participants)}); "
+                    f"the maximum is {MAX_PARTICIPANTS}."
+                )
+            if len(self.obligations) > MAX_OBLIGATIONS:
+                raise ValueError(
+                    f"Too many obligations ({len(self.obligations)}); "
+                    f"the maximum is {MAX_OBLIGATIONS}."
+                )
+            pids = [p.id for p in self.participants]
+            if len(pids) != len(set(pids)):
+                raise ValueError("Participant ids must be unique.")
+            oids = [o.id for o in self.obligations]
+            if len(oids) != len(set(oids)):
+                raise ValueError("Obligation ids must be unique.")
+            pset = set(pids)
+            for o in self.obligations:
+                if o.payer not in pset:
+                    raise ValueError(f"Obligation '{o.id}' has unknown payer '{o.payer}'.")
+                if o.payee not in pset:
+                    raise ValueError(f"Obligation '{o.id}' has unknown payee '{o.payee}'.")
         elif self.problem == "fraud_detection":
             cfg = self.classification
             if cfg is None:
@@ -332,7 +431,7 @@ class ProblemSpec(BaseModel):
         else:
             raise ValueError(
                 f"Unknown problem '{self.problem}'. Known: collateral_allocation, "
-                "payment_routing, fraud_detection."
+                "payment_routing, settlement_netting, fraud_detection."
             )
         return self
 

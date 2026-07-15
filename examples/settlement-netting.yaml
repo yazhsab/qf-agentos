@@ -1,0 +1,51 @@
+# QF-AgentOS — settlement / liquidity-saving optimisation (RTGS gridlock resolution).
+#
+#   qf-agent solve examples/settlement-netting.yaml
+#
+# Four banks hold queued interbank payment obligations. Three of them form a
+# classic GRIDLOCK cycle — A owes B, B owes C, C owes A, 100 each — and every
+# bank in the cycle has only 10 of liquidity, so NONE can settle its leg on its
+# own (each needs 100, has 10). A liquidity-saving mechanism settles the cycle
+# SIMULTANEOUSLY: within the batch each bank's inflow (100) funds its outflow
+# (100), so the net movement is 0 and 10 of liquidity is enough. Bank D, holding
+# 60 of liquidity, additionally funds a 50 payment to A.
+#
+# The platform builds a QUBO that encodes each participant's liquidity inequality
+# (net outflow <= balance) with binary slack bits, solves it with QAOA on a
+# reduced instance, and re-checks the decoded batch against exact liquidity. The
+# exact MILP is the fair classical comparator. Expected honest outcome: the batch
+# settles all four obligations (gridlock resolved) and QAOA reaches PARITY with
+# the classical optimum — so the auditor recommends the deterministic classical
+# solver.
+
+problem: settlement_netting
+
+objective:
+  type: maximise_settled_value
+
+settlement:
+  penalty_scale: 8.0          # base QUBO penalty weight for the liquidity constraints
+  # min_settled_ratio: 0.75   # (optional) require the batch to settle >= 75% of queued value
+
+execution_policy:
+  compare_classical: true
+  allow_quantum_annealing: true
+  allow_gate_model: true
+  max_qpu_budget_usd: 50
+  max_effective_qubits: 12    # 4 obligations + 2 slack bits x 4 participants
+  autonomy_level: L2
+  qaoa_reps: 2
+  shots: 4096
+  seed: 7
+
+participants:
+  - { id: BANK_A, name: Clearstream A, balance: 10 }
+  - { id: BANK_B, name: Meridian B,    balance: 10 }
+  - { id: BANK_C, name: Helvetia C,    balance: 10 }
+  - { id: BANK_D, name: Atlas D,       balance: 60 }   # liquidity provider
+
+obligations:
+  - { id: O_AB, payer: BANK_A, payee: BANK_B, amount: 100 }   # ┐
+  - { id: O_BC, payer: BANK_B, payee: BANK_C, amount: 100 }   # ├ gridlock cycle
+  - { id: O_CA, payer: BANK_C, payee: BANK_A, amount: 100 }   # ┘
+  - { id: O_DA, payer: BANK_D, payee: BANK_A, amount: 50 }    # D funds A

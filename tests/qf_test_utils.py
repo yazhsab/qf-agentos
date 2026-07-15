@@ -193,6 +193,55 @@ def make_routing_spec(
     )
 
 
+def default_participants() -> list[dict[str, Any]]:
+    return [
+        {"id": "BANK_A", "balance": 10},
+        {"id": "BANK_B", "balance": 10},
+        {"id": "BANK_C", "balance": 10},
+        {"id": "BANK_D", "balance": 60},
+    ]
+
+
+def default_obligations() -> list[dict[str, Any]]:
+    # A gridlock cycle A->B->C->A (100 each) + a liquidity-funded D->A.
+    return [
+        {"id": "O_AB", "payer": "BANK_A", "payee": "BANK_B", "amount": 100},
+        {"id": "O_BC", "payer": "BANK_B", "payee": "BANK_C", "amount": 100},
+        {"id": "O_CA", "payer": "BANK_C", "payee": "BANK_A", "amount": 100},
+        {"id": "O_DA", "payer": "BANK_D", "payee": "BANK_A", "amount": 50},
+    ]
+
+
+def make_settlement_spec(
+    *,
+    max_qubits: int = 12,
+    autonomy: str = "L2",
+    allow_gate_model: bool = True,
+    participants: list[dict[str, Any]] | None = None,
+    obligations: list[dict[str, Any]] | None = None,
+    settlement: dict[str, Any] | None = None,
+    qaoa_reps: int = 1,
+    seed: int = 7,
+) -> ProblemSpec:
+    return ProblemSpec.model_validate(
+        {
+            "problem": "settlement_netting",
+            "objective": {"type": "maximise_settled_value"},
+            "settlement": settlement if settlement is not None else {"penalty_scale": 8.0},
+            "execution_policy": {
+                "max_effective_qubits": max_qubits,
+                "autonomy_level": autonomy,
+                "allow_gate_model": allow_gate_model,
+                "qaoa_reps": qaoa_reps,
+                "shots": 1024,
+                "seed": seed,
+            },
+            "participants": default_participants() if participants is None else participants,
+            "obligations": default_obligations() if obligations is None else obligations,
+        }
+    )
+
+
 def make_fraud_spec(
     *,
     target_metric: str = "auc",
