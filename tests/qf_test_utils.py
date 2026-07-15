@@ -191,3 +191,46 @@ def make_routing_spec(
             "transactions": default_transactions() if transactions is None else transactions,
         }
     )
+
+
+def make_fraud_spec(
+    *,
+    target_metric: str = "auc",
+    feature_budget: int = 4,
+    allow_gate_model: bool = True,
+    synthetic: dict[str, Any] | None = None,
+    features: list[list[float]] | None = None,
+    labels: list[int] | None = None,
+    max_qubits: int = 4,
+    autonomy: str = "L2",
+    seed: int = 7,
+) -> ProblemSpec:
+    cfg: dict[str, Any] = {
+        "target_metric": target_metric,
+        "test_fraction": 0.3,
+        "feature_budget": feature_budget,
+        "bootstrap": 200,
+    }
+    if features is None:
+        cfg["synthetic"] = synthetic or {
+            "n_samples": 160,
+            "n_features": 6,
+            "n_informative": 3,
+            "class_balance": 0.25,
+            "separability": 0.9,
+        }
+    body: dict[str, Any] = {
+        "problem": "fraud_detection",
+        "objective": {"type": "maximise_detection_performance"},
+        "classification": cfg,
+        "execution_policy": {
+            "max_effective_qubits": max_qubits,
+            "autonomy_level": autonomy,
+            "allow_gate_model": allow_gate_model,
+            "seed": seed,
+        },
+    }
+    if features is not None:
+        body["features"] = features
+        body["labels"] = labels
+    return ProblemSpec.model_validate(body)

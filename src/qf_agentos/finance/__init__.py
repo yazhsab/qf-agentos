@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from ..core.domain import ProblemDomain
+from ..core.domain import DomainBase
 from ..core.errors import SpecError
 
-# Problem families known to the platform. Each maps to a ProblemDomain.
-KNOWN_PROBLEMS: tuple[str, ...] = ("collateral_allocation", "payment_routing")
+# Problem families known to the platform. Each maps to a DomainBase.
+KNOWN_PROBLEMS: tuple[str, ...] = (
+    "collateral_allocation",
+    "payment_routing",
+    "fraud_detection",
+)
 
 
-def get_domain(problem: str) -> ProblemDomain:
-    """Return the :class:`ProblemDomain` for a problem family (lazy import)."""
+def get_domain(problem: str) -> DomainBase:
+    """Return the domain for a problem family (lazy import)."""
     if problem == "collateral_allocation":
         from .collateral import CollateralDomain
 
@@ -19,6 +23,10 @@ def get_domain(problem: str) -> ProblemDomain:
         from .payment_routing import PaymentRoutingDomain
 
         return PaymentRoutingDomain()
+    if problem == "fraud_detection":
+        from .fraud import FraudDetectionDomain
+
+        return FraudDetectionDomain()
     raise SpecError(f"Unknown problem '{problem}'. Known problems: {', '.join(KNOWN_PROBLEMS)}.")
 
 

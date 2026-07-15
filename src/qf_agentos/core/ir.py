@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -28,6 +28,7 @@ ALLOWED_CONCENTRATION_ATTRS: frozenset[str] = frozenset({"issuer", "counterparty
 MAX_INVENTORY = 100_000
 MAX_TRANSACTIONS = 100_000
 MAX_ROUTES = 1_000
+MAX_SAMPLES = 2_000  # classification: RBF/quantum kernels are O(n^2)+
 
 
 class AutonomyLevel(str, Enum):
@@ -47,6 +48,7 @@ class AutonomyLevel(str, Enum):
 class ObjectiveType(str, Enum):
     minimise_collateral_cost = "minimise_collateral_cost"
     minimise_routing_cost = "minimise_routing_cost"
+    maximise_detection_performance = "maximise_detection_performance"
 
 
 class Security(BaseModel):
@@ -172,6 +174,37 @@ class RoutingConstraints(BaseModel):
         return v
 
 
+# ---------------------------------------------------------------------------
+# Classification problem family (quantum kernels)
+# ---------------------------------------------------------------------------
+
+
+class SyntheticConfig(BaseModel):
+    """Deterministic synthetic-data generator for a classification demo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    n_samples: int = Field(default=240, ge=20, le=MAX_SAMPLES)
+    n_features: int = Field(default=6, ge=1, le=32)
+    n_informative: int = Field(default=3, ge=1)
+    class_balance: float = Field(default=0.2, gt=0, lt=1, description="Positive-class rate.")
+    separability: float = Field(default=0.9, ge=0)
+
+
+class ClassificationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_metric: Literal["auc", "accuracy", "f1"] = "auc"
+    test_fraction: float = Field(default=0.3, gt=0, lt=1, description="Temporal holdout fraction.")
+    feature_budget: int = Field(
+        default=4, ge=1, le=16, description="Qubits = features for the kernel."
+    )
+    rbf_gamma: float = Field(default=0.3, gt=0)
+    ridge_lambda: float = Field(default=0.01, gt=0)
+    bootstrap: int = Field(default=500, ge=50, le=5000)
+    synthetic: SyntheticConfig | None = None
+
+
 class ExecutionPolicy(BaseModel):
     """Policy the agents must obey. Governs backends, budget, and autonomy."""
 
@@ -214,6 +247,12 @@ class ProblemSpec(BaseModel):
     transactions: list[Transaction] = Field(default_factory=list)
     routes: list[PaymentRoute] = Field(default_factory=list)
 
+    # fraud_detection (classification)
+    classification: ClassificationConfig | None = None
+    features: list[list[float]] = Field(default_factory=list)
+    labels: list[int] = Field(default_factory=list)
+    timestamps: list[float] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def _validate(self) -> ProblemSpec:
         if self.problem == "collateral_allocation":
@@ -252,9 +291,41 @@ class ProblemSpec(BaseModel):
                         raise ValueError(
                             f"Transaction '{t.id}' lists unknown eligible route '{rid}'."
                         )
+        elif self.problem == "fraud_detection":
+            cfg = self.classification
+            if cfg is None:
+                raise ValueError("fraud_detection requires a 'classification' block.")
+            has_inline = bool(self.features) and bool(self.labels)
+            if not has_inline and cfg.synthetic is None:
+                raise ValueError(
+                    "fraud_detection needs inline 'features'+'labels' or a "
+                    "'classification.synthetic' block."
+                )
+            if has_inline:
+                if len(self.features) != len(self.labels):
+                    raise ValueError("features and labels must have the same length.")
+                if len(self.features) > MAX_SAMPLES:
+                    raise ValueError(f"Too many samples; the maximum is {MAX_SAMPLES}.")
+                widths = {len(row) for row in self.features}
+                if len(widths) > 1:
+                    raise ValueError("All feature rows must have the same width.")
+                if set(self.labels) - {0, 1}:
+                    raise ValueError("labels must be binary (0/1).")
+                n_features = widths.pop() if widths else 0
+                if self.timestamps and len(self.timestamps) != len(self.labels):
+                    raise ValueError("timestamps must match the number of samples.")
+            else:
+                assert cfg.synthetic is not None
+                n_features = cfg.synthetic.n_features
+            if cfg.feature_budget > n_features:
+                raise ValueError(
+                    f"feature_budget ({cfg.feature_budget}) exceeds available features "
+                    f"({n_features})."
+                )
         else:
             raise ValueError(
-                f"Unknown problem '{self.problem}'. Known: collateral_allocation, payment_routing."
+                f"Unknown problem '{self.problem}'. Known: collateral_allocation, "
+                "payment_routing, fraud_detection."
             )
         return self
 

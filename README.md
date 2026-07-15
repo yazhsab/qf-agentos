@@ -48,7 +48,8 @@ Requires Python ≥ 3.11.
 
 ```bash
 qf-agent solve   examples/collateral-allocation.yaml   # full pipeline + evidence bundle
-qf-agent solve   examples/payment-routing.yaml         # 2nd problem family (generalized assignment)
+qf-agent solve   examples/payment-routing.yaml         # optimization: generalized assignment
+qf-agent solve   examples/fraud-detection.yaml         # classification: quantum kernels
 qf-agent explain examples/collateral-allocation.yaml   # L0: understand + formulate only
 qf-agent plan    examples/collateral-allocation.yaml   # L1: experiment plan, no execution
 qf-agent solve   examples/abstention-demo.yaml         # honest quantum abstention
@@ -69,6 +70,16 @@ family plugs into the same agents, backends, verification, audit, and governance
   expected cost (processing + fixed fee + fraud + latency + expected decline)
   s.t. per-route capacity, network diversification, and an approval floor
   (generalized assignment MILP + one-hot QUBO).
+- **`fraud_detection`** *(classification — a second quantum technique)* — compare
+  strong classical baselines (logistic regression + RBF kernel-ridge) against a
+  **quantum fidelity kernel** (ZZ feature map) under the *same* kernel-ridge
+  learner, on a temporal holdout, with data-leakage checks and a bootstrap
+  significance test. It measures rather than claims: no "quantum beats AI" unless
+  the improvement is statistically significant.
+
+Two **task types** are supported — `optimization` (MILP + QAOA) and
+`classification` (classical baselines + quantum kernels) — selected automatically
+from the problem.
 
 ## SDK
 

@@ -9,7 +9,7 @@ predecessors gracefully rather than raising ``KeyError``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .artifacts import (
     EvidenceBundle,
@@ -54,6 +54,13 @@ class PipelineState:
     instance_qaoa: SolveResult | None = None
     qaoa_raw: QaoaResult | None = None
     qubo_exact_energy: float | None = None
+
+    # Classification task (fraud_detection): dataset, split, models, feature plan.
+    # Typed loosely to keep core free of a finance dependency.
+    dataset: Any = None
+    split: Any = None
+    feature_plan: dict[str, Any] | None = None
+    class_models: dict[str, Any] = field(default_factory=dict)
 
     # Agents 7-9 — verification, audit, governance
     verification: dict[str, VerificationReport] = field(default_factory=dict)

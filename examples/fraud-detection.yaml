@@ -1,0 +1,33 @@
+# QF-AgentOS — fraud-detection classification with QUANTUM KERNELS.
+#
+#   qf-agent solve examples/fraud-detection.yaml
+#
+# An HONEST experimentation harness — NOT a claim that quantum ML beats classical.
+# Trains strong classical baselines (logistic regression + RBF kernel ridge) and a
+# quantum fidelity-kernel classifier on the SAME learner, on a temporal holdout,
+# and reports whether any quantum improvement is STATISTICALLY SIGNIFICANT.
+
+problem: fraud_detection
+
+objective:
+  type: maximise_detection_performance
+
+classification:
+  target_metric: auc          # imbalanced data → AUC, not accuracy
+  test_fraction: 0.3          # temporal holdout (latest 30% is the test set)
+  feature_budget: 4           # qubits = features fed to the quantum kernel
+  rbf_gamma: 0.3
+  ridge_lambda: 0.01
+  bootstrap: 500              # bootstrap resamples for the significance test
+  synthetic:                  # deterministic, seeded demo dataset
+    n_samples: 300
+    n_features: 6
+    n_informative: 3
+    class_balance: 0.2        # 20% positive (fraud-like imbalance)
+    separability: 0.8
+
+execution_policy:
+  allow_gate_model: true
+  max_effective_qubits: 4
+  autonomy_level: L2
+  seed: 7
