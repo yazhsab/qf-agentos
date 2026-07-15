@@ -1,0 +1,30 @@
+name: fraud-quantum-kernel
+version: 0.1.0
+summary: >
+  An honest experimentation harness for quantum-kernel fraud detection. Trains
+  strong classical baselines (logistic regression + RBF kernel ridge) and a
+  quantum fidelity-kernel classifier (ZZ feature map) on the SAME kernel-ridge
+  learner, on a temporal holdout, and reports whether any quantum improvement is
+  statistically significant via a bootstrap confidence interval. It does NOT
+  claim quantum ML beats classical — it measures.
+problem: fraud_detection
+task: classification
+inputs:
+  - features            # inline feature matrix, or a synthetic generator
+  - labels              # binary {0,1}
+  - timestamps          # optional; used for the temporal holdout
+  - classification_config   # target_metric, test_fraction, feature_budget, gamma, lambda, bootstrap
+methods:
+  classical:
+    - logistic_regression
+    - rbf_kernel_ridge
+  quantum:
+    - zz_fidelity_kernel_ridge    # statevector simulator
+verification:
+  - no_data_leakage
+  - temporal_validity
+  - metric_recomputation
+  - bootstrap_significance
+autonomy:
+  simulator: L2
+  paid_qpu: L3

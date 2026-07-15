@@ -21,6 +21,7 @@ import time
 from ..backends.base import QuboRunConfig
 from ..backends.registry import get_solver
 from ..core.artifacts import QaoaResult, QuantumSelection, TranspileMetrics
+from ..core.domain import ProblemDomain
 from ..core.policy import Action
 from ..core.workflow import RunContext
 from ..finance import get_domain
@@ -68,6 +69,7 @@ def execution_agent(ctx: RunContext) -> str:
         return "Execution skipped: no instance/QUBO/plan available."
 
     domain = get_domain(spec.problem)
+    assert isinstance(domain, ProblemDomain)
     config = QuboRunConfig(seed=pol.seed, shots=pol.shots, reps=pol.qaoa_reps)
     ran: list[str] = []
 

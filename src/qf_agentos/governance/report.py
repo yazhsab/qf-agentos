@@ -71,9 +71,21 @@ def _evidence_digest(ctx: RunContext, results: dict[str, SolveResult]) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
+def _collect_classification_results(ctx: RunContext) -> dict[str, SolveResult]:
+    from ..finance.qml import model_to_result
+
+    results: dict[str, SolveResult] = {}
+    for name, model in ctx.state.class_models.items():
+        scope = "research_instance" if model.kind == "quantum" else "full_dataset"
+        backend = "gate_model_statevector_sim" if model.kind == "quantum" else "cpu"
+        results[name] = model_to_result(model, scope=scope, backend=backend)
+    return results
+
+
 def build_bundle(ctx: RunContext) -> EvidenceBundle:
     st = ctx.state
-    results = _collect_results(ctx)
+    is_classification = st.dataset is not None
+    results = _collect_classification_results(ctx) if is_classification else _collect_results(ctx)
     digest = _evidence_digest(ctx, results)
     if st.reproducibility is not None:
         st.reproducibility.evidence_digest = digest
@@ -87,6 +99,7 @@ def build_bundle(ctx: RunContext) -> EvidenceBundle:
         "requirements": st.requirements.model_dump(mode="json") if st.requirements else None,
         "formulations": st.formulations.model_dump(mode="json") if st.formulations else None,
         "hardware_plan": st.hardware_plan.model_dump(mode="json") if st.hardware_plan else None,
+        "feature_plan": st.feature_plan,
         "quantum_selection": st.quantum_selection.model_dump(mode="json")
         if st.quantum_selection
         else None,
@@ -101,11 +114,91 @@ def build_bundle(ctx: RunContext) -> EvidenceBundle:
         "trace": [asdict(e) for e in ctx.trace],
     }
 
+    report_md = (
+        _render_classification_report(ctx, manifest)
+        if is_classification
+        else _render_report(ctx, manifest)
+    )
     return EvidenceBundle(
         manifest=manifest,
-        report_md=_render_report(ctx, manifest),
+        report_md=report_md,
         model_card_md=_render_model_card(ctx),
     )
+
+
+def _render_classification_report(ctx: RunContext, manifest: dict[str, Any]) -> str:
+    st = ctx.state
+    audit = st.audit
+    req = st.requirements
+    plan = st.feature_plan or {}
+    L: list[str] = [f"# QF-AgentOS Evidence Report — `{ctx.run_id}`\n"]
+    L.append(
+        f"**Problem:** {ctx.spec.problem} (classification)  |  "
+        f"**Autonomy:** {ctx.spec.execution_policy.autonomy_level.value}\n"
+    )
+    L.append(f"**Evidence digest:** `{manifest['evidence_digest'][:16]}…`\n")
+    L.append("## Executive summary\n")
+    if audit:
+        L.append(
+            f"**FINAL DECISION: {audit.category.value}** — recommended: "
+            f"`{audit.recommended_method}`.\n"
+        )
+        L.append("> " + "\n> ".join(audit.rationale) + "\n")
+    if req:
+        L.append("## 1. Requirements (Agent 1)\n")
+        L.append(f"- {req.summary}")
+        for name, value in req.metrics.items():
+            L.append(f"- {name}: **{value:,.3f}**")
+        L += [f"  - {g}" for g in req.discovered_gaps]
+        L.append("")
+    L.append("## 2-3. Models (classical baselines + quantum kernel)\n")
+    L.append("| model | kind | primary metric | auc | accuracy | f1 | runtime |")
+    L.append("|---|---|---|---|---|---|---|")
+    for name, model in st.class_models.items():
+        mtr = model.metrics
+        L.append(
+            f"| `{name}` | {model.kind} | {model.metric:.4f} | {mtr['auc']:.3f} | "
+            f"{mtr['accuracy']:.3f} | {mtr['f1']:.3f} | {model.runtime_s * 1000:.0f} ms |"
+        )
+    L.append("")
+    if plan:
+        L.append("## 4-5. Quantum plan\n")
+        L.append(
+            f"- Fidelity kernel over **{plan.get('n_qubits')} features**: "
+            f"{plan.get('selected_feature_names')}"
+        )
+        L.append(
+            f"- Quantum training samples: {plan.get('n_quantum_train')} "
+            f"(reduced instance); target: {plan.get('target') or 'ABSTAIN'}"
+        )
+        L.append("")
+    L.append("## 7. Verification (Agent 7)\n")
+    for name, rep in st.verification.items():
+        L.append(f"### `{name}` — feasible: **{rep.feasible}**")
+        for c in rep.checks:
+            L.append(f"- {c.name}: {'ok' if c.satisfied else 'FAIL'} — {c.detail}")
+        if rep.quantum_contribution:
+            qc = rep.quantum_contribution
+            L.append(f"- **Significance vs {qc['compared_to']}:** {qc['verdict']}")
+            L.append(
+                f"  - mean Δ = {qc['mean_diff']:+.4f}, 95% CI "
+                f"[{qc['ci95'][0]:+.4f}, {qc['ci95'][1]:+.4f}], significant: {qc['significant']}"
+            )
+        L.append("")
+    L.append("## 8. Auditor (Agent 8)\n")
+    if audit:
+        L.append("```\n" + audit.rendered + "\n```\n")
+    if st.reproducibility:
+        L.append(
+            f"## 9. Governance\n- Reproducibility: deterministic, seed={st.reproducibility.seed}."
+        )
+    if ctx.warnings:
+        L += ["- Warnings:"] + [f"  - {w}" for w in ctx.warnings]
+    L.append(
+        "\n_Generated by QF-AgentOS. Research artifact — not investment advice. "
+        "This is an experimentation harness, not a claim that quantum ML beats classical._"
+    )
+    return "\n".join(L)
 
 
 def _render_report(ctx: RunContext, manifest: dict[str, Any]) -> str:
@@ -231,14 +324,22 @@ def _render_report(ctx: RunContext, manifest: dict[str, Any]) -> str:
 
 
 def _render_model_card(ctx: RunContext) -> str:
+    """Model card, branched by task type so the compliance artifact matches the
+    methodology that actually ran."""
+    if ctx.state.dataset is not None:
+        return _render_classification_model_card(ctx)
+    return _render_optimization_model_card(ctx)
+
+
+def _render_optimization_model_card(ctx: RunContext) -> str:
     spec = ctx.spec
     audit = ctx.state.audit
     return "\n".join(
         [
-            f"# Model Card — QF-AgentOS collateral-allocation run `{ctx.run_id}`\n",
+            f"# Model Card — QF-AgentOS {spec.problem} run `{ctx.run_id}`\n",
             "## Intended use",
-            "Decision-support for collateral optimisation, comparing classical and quantum methods. "
-            "Not for autonomous execution of trades, transfers, or limit changes.\n",
+            "Decision-support for a financial optimisation problem, comparing classical and "
+            "quantum methods. Not for autonomous execution of trades, transfers, or limit changes.\n",
             "## Method",
             "- Classical: SciPy/HiGHS LP relaxation + binary MILP (exact).",
             "- Quantum: QUBO → Ising → QAOA on a statevector simulator (reduced instance).",
@@ -247,8 +348,41 @@ def _render_model_card(ctx: RunContext) -> str:
             f"- Decision category: **{audit.category.value if audit else 'n/a'}**",
             f"- Recommended method: `{audit.recommended_method if audit else 'n/a'}`\n",
             "## Limitations",
-            "- Single counterparty posting model; concentration handled as a generic group cap.",
-            "- QUBO relaxation drops concentration/HQLA (re-checked, not encoded).",
+            "- QUBO relaxation drops some constraints (re-checked, not encoded).",
+            "- No real-QPU results (gated behind L3 + credentials + budget).",
+            f"- Autonomy level for this run: {spec.execution_policy.autonomy_level.value}.\n",
+            "## Reproducibility",
+            f"- Seed: {spec.execution_policy.seed}. Deterministic given identical inputs.",
+        ]
+    )
+
+
+def _render_classification_model_card(ctx: RunContext) -> str:
+    spec = ctx.spec
+    audit = ctx.state.audit
+    plan = ctx.state.feature_plan or {}
+    return "\n".join(
+        [
+            f"# Model Card — QF-AgentOS {spec.problem} run `{ctx.run_id}`\n",
+            "## Intended use",
+            "An experimentation harness comparing classical baselines against a quantum-kernel "
+            "classifier for fraud detection. Decision-support only — NOT an automated fraud "
+            "decisioning system, and NOT a claim that quantum ML outperforms classical.\n",
+            "## Method",
+            "- Classical baselines: logistic regression (IRLS) + RBF kernel-ridge classifier.",
+            "- Quantum: a ZZ feature-map **fidelity kernel** + the SAME kernel-ridge learner, on "
+            f"a reduced instance of {plan.get('n_qubits', '?')} features.",
+            "- Evaluation on a temporal holdout; quantum vs the RBF kernel judged by a bootstrap "
+            "significance test (95% CI).",
+            "- Verified for data leakage (train/test disjoint; train-only standardisation) and "
+            "temporal validity.\n",
+            "## Result",
+            f"- Decision category: **{audit.category.value if audit else 'n/a'}**",
+            f"- Recommended method: `{audit.recommended_method if audit else 'n/a'}`\n",
+            "## Limitations",
+            "- The quantum kernel uses a reduced feature/sample instance (feature budget + a "
+            "training-sample cap); it is not the full dataset the classical baselines see.",
+            "- Synthetic/inline data only in this release; no production feature pipeline.",
             "- No real-QPU results (gated behind L3 + credentials + budget).",
             f"- Autonomy level for this run: {spec.execution_policy.autonomy_level.value}.\n",
             "## Reproducibility",

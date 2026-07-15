@@ -7,12 +7,14 @@ compares a quantum method against a deliberately weak baseline.
 
 from __future__ import annotations
 
+from ..core.domain import ProblemDomain
 from ..core.workflow import RunContext
 from ..finance import get_domain
 
 
 def classical_baseline_agent(ctx: RunContext) -> str:
     domain = get_domain(ctx.spec.problem)
+    assert isinstance(domain, ProblemDomain)
     baseline = domain.solve_classical_full(ctx.spec)
     ctx.state.classical_lp = baseline.lp
     ctx.state.classical_milp = baseline.milp

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from ..backends.registry import discover_capabilities
 from ..core.artifacts import HardwarePlan
+from ..core.domain import ProblemDomain
 from ..core.workflow import RunContext
 from ..finance import get_domain
 
@@ -21,6 +22,7 @@ def hardware_planner_agent(ctx: RunContext) -> str:
     pol = spec.execution_policy
     statevector_limit = ctx.settings.statevector_qubit_limit
     domain = get_domain(spec.problem)
+    assert isinstance(domain, ProblemDomain)
 
     instance = domain.reduce_to_instance(spec, pol.max_effective_qubits)
     slack = max(0, min(_SLACK_BITS, pol.max_effective_qubits - instance.n_qubits))

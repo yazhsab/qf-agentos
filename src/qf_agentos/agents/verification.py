@@ -16,7 +16,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.artifacts import QaoaResult, ReproducibilityInfo
-from ..core.domain import ProblemInstance
+from ..core.domain import ProblemDomain, ProblemInstance
 from ..core.result import VerificationReport
 from ..core.workflow import RunContext
 from ..finance import get_domain
@@ -84,6 +84,7 @@ def verification_agent(ctx: RunContext) -> str:
     spec = ctx.spec
     st = ctx.state
     domain = get_domain(spec.problem)
+    assert isinstance(domain, ProblemDomain)
     instance: ProblemInstance | None = st.instance
     reports: dict[str, VerificationReport] = {}
 

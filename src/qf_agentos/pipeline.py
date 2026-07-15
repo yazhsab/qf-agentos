@@ -17,15 +17,24 @@ from .agents import (
     requirements_agent,
     verification_agent,
 )
+from .agents.classification import (
+    classification_auditor_agent,
+    classification_baseline_agent,
+    classification_execution_agent,
+    classification_planner_agent,
+    classification_verification_agent,
+)
 from .core.config import Settings, get_settings
+from .core.domain import TaskType
 from .core.ir import ProblemSpec
 from .core.observability import configure_logging
 from .core.policy import PolicyEngine
 from .core.workflow import RunContext, Workflow
+from .finance import get_domain
 
 
 def build_default_pipeline() -> Workflow:
-    """The reference 8-agent pipeline (Governance is the 9th, terminal, step)."""
+    """The reference optimization pipeline (Governance is the terminal step)."""
     return Workflow(
         [
             ("requirements", requirements_agent),
@@ -39,6 +48,30 @@ def build_default_pipeline() -> Workflow:
             ("governance", governance_agent),
         ]
     )
+
+
+def build_classification_pipeline() -> Workflow:
+    """The classification pipeline (quantum kernels). Reuses Requirements,
+    Formulation, and Governance; specialises the middle agents."""
+    return Workflow(
+        [
+            ("requirements", requirements_agent),
+            ("formulation", formulation_agent),
+            ("classical_baseline", classification_baseline_agent),
+            ("quantum_planner", classification_planner_agent),
+            ("execution", classification_execution_agent),
+            ("verification", classification_verification_agent),
+            ("auditor", classification_auditor_agent),
+            ("governance", governance_agent),
+        ]
+    )
+
+
+def pipeline_for(spec: ProblemSpec) -> Workflow:
+    """Select the pipeline by the problem's task type."""
+    if get_domain(spec.problem).task_type == TaskType.CLASSIFICATION:
+        return build_classification_pipeline()
+    return build_default_pipeline()
 
 
 def make_run_id(spec: ProblemSpec) -> str:
@@ -67,5 +100,5 @@ def solve(
         seed=spec.execution_policy.seed,
         settings=settings,
     )
-    build_default_pipeline().run(ctx, emit=emit)
+    pipeline_for(spec).run(ctx, emit=emit)
     return ctx

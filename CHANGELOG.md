@@ -7,6 +7,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Second quantum technique + task type: quantum-kernel classification**
+  (`fraud_detection`). An honest experimentation harness — strong classical
+  baselines (logistic regression + RBF kernel-ridge) vs a ZZ fidelity **quantum
+  kernel** on the *same* kernel-ridge learner, on a temporal holdout, with
+  data-leakage/temporal checks and a **bootstrap significance test**. The auditor
+  will not claim a quantum win unless it is statistically significant. Adds the
+  `fraud-quantum-kernel` skill, an example, and a dedicated classification
+  pipeline (`TaskType`, `ClassificationDomain`, `pipeline_for`). The optimization
+  path is unchanged.
 - **Second problem family: payment-routing optimisation** (generalized assignment
   problem) — route transactions across candidate routes to minimise expected cost
   (processing + fixed fee + fraud + latency + expected decline) subject to
