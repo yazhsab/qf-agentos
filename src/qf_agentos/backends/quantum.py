@@ -40,17 +40,49 @@ def _ising_terms(qubo: Qubo) -> tuple[float, list[tuple[str, list[int], float]]]
     return const, terms
 
 
-def build_qaoa_circuit(qubo: Qubo, reps: int, seed: int) -> tuple[Any, Any, int]:
+def _build_ansatz(cost_op: Any, reps: int, n: int, warm_start: list[float] | None) -> Any:
+    """QAOA ansatz, optionally warm-started (Egger et al. 2021).
+
+    A warm start biases the initial state toward a classical relaxation solution
+    ``c_i in [0,1]`` via RY(2·arcsin(√c_i)) and uses the corresponding warm-start
+    mixer, so the classical solution is the mixer's ground state.
+    """
+    from qiskit.circuit import Parameter, QuantumCircuit
+    from qiskit.circuit.library import QAOAAnsatz
+
+    if warm_start is None or len(warm_start) != n:
+        return QAOAAnsatz(cost_operator=cost_op, reps=reps)
+
+    eps = 0.1  # regularisation: keep angles away from the poles
+    c = np.clip(np.asarray(warm_start, dtype=float), eps, 1.0 - eps)
+    theta = 2.0 * np.arcsin(np.sqrt(c))
+
+    init = QuantumCircuit(n)
+    for i in range(n):
+        init.ry(float(theta[i]), i)
+
+    beta = Parameter("beta_ws")
+    mixer = QuantumCircuit(n)
+    for i in range(n):
+        mixer.ry(-float(theta[i]), i)
+        mixer.rz(-2.0 * beta, i)
+        mixer.ry(float(theta[i]), i)
+
+    return QAOAAnsatz(cost_operator=cost_op, reps=reps, initial_state=init, mixer_operator=mixer)
+
+
+def build_qaoa_circuit(
+    qubo: Qubo, reps: int, seed: int, warm_start: list[float] | None = None
+) -> tuple[Any, Any, int]:
     """Build (transpiled ansatz, cost operator, n_params). Cost layer synthesised once."""
     from qiskit import transpile
-    from qiskit.circuit.library import QAOAAnsatz
     from qiskit.quantum_info import SparsePauliOp
 
     _const, terms = _ising_terms(qubo)
     if not terms:
         raise BackendError("Degenerate QUBO: Ising Hamiltonian has no non-trivial terms.")
     cost_op = SparsePauliOp.from_sparse_list(terms, num_qubits=qubo.n)
-    ansatz = QAOAAnsatz(cost_operator=cost_op, reps=reps)
+    ansatz = _build_ansatz(cost_op, reps, qubo.n, warm_start)
     isa = transpile(
         ansatz, basis_gates=_FAST_BASIS, optimization_level=1, seed_transpiler=int(seed)
     )
@@ -58,7 +90,13 @@ def build_qaoa_circuit(qubo: Qubo, reps: int, seed: int) -> tuple[Any, Any, int]
 
 
 def optimize_qaoa(
-    qubo: Qubo, *, reps: int, seed: int, restarts: int = 4, maxiter: int = 150
+    qubo: Qubo,
+    *,
+    reps: int,
+    seed: int,
+    restarts: int = 4,
+    maxiter: int = 150,
+    warm_start: list[float] | None = None,
 ) -> dict[str, Any]:
     """Optimise QAOA parameters on the statevector simulator (cheap).
 
@@ -69,7 +107,7 @@ def optimize_qaoa(
     from scipy.optimize import minimize
 
     const, _terms = _ising_terms(qubo)
-    isa, cost_op, num_params = build_qaoa_circuit(qubo, reps, seed)
+    isa, cost_op, num_params = build_qaoa_circuit(qubo, reps, seed, warm_start)
 
     def expectation(vals: np.ndarray) -> float:
         sv = Statevector(isa.assign_parameters(vals))
@@ -130,6 +168,7 @@ def run_qaoa(
     seed: int = 7,
     restarts: int = 4,
     maxiter: int = 150,
+    warm_start: list[float] | None = None,
 ) -> dict[str, Any]:
     """Run QAOA end-to-end on the statevector simulator. Returns a result dict."""
     from qiskit import transpile
@@ -145,7 +184,9 @@ def run_qaoa(
             "reps": reps,
         }
 
-    opt = optimize_qaoa(qubo, reps=reps, seed=seed, restarts=restarts, maxiter=maxiter)
+    opt = optimize_qaoa(
+        qubo, reps=reps, seed=seed, restarts=restarts, maxiter=maxiter, warm_start=warm_start
+    )
     counts = _sample_statevector(opt["isa"], opt["best_params"], shots, seed)
     best_bits, best_energy, energy_cache = _rank_bitstrings(qubo, counts)
 
@@ -154,11 +195,10 @@ def run_qaoa(
     )
 
     # Transpilation metrics (structure only; independent of parameter values).
-    from qiskit.circuit.library import QAOAAnsatz
     from qiskit.quantum_info import SparsePauliOp
 
     cost_op = SparsePauliOp.from_sparse_list(terms, num_qubits=n)
-    ansatz = QAOAAnsatz(cost_operator=cost_op, reps=reps)
+    ansatz = _build_ansatz(cost_op, reps, n, warm_start)
     tqc = transpile(
         ansatz, basis_gates=_METRIC_BASIS, optimization_level=1, seed_transpiler=int(seed)
     )
@@ -169,6 +209,7 @@ def run_qaoa(
         "best_bits": best_bits,
         "best_energy": best_energy,
         "expectation_ising": opt["best_ev"] + opt["ising_const"],
+        "warm_started": warm_start is not None,
         "n_qubits": n,
         "reps": reps,
         "num_parameters": opt["num_parameters"],

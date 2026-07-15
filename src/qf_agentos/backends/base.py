@@ -22,6 +22,9 @@ class QuboRunConfig:
     seed: int = 7
     shots: int = 4096
     reps: int = 2
+    # Per-qubit biases in [0,1] from a classical relaxation, for warm-start QAOA
+    # (length == qubo.n). None → cold start. Ignored by non-QAOA solvers.
+    warm_start: tuple[float, ...] | None = None
 
 
 @dataclass

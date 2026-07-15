@@ -827,3 +827,22 @@ class CollateralDomain(ProblemDomain):
             instance.minimum_hqla,
             instance.concentration,
         )
+
+    def instance_warm_start(  # type: ignore[override]
+        self, instance: ResearchInstance, qubo: Qubo
+    ) -> list[float] | None:
+        """Warm-start biases from the instance LP relaxation (slack bits → 0.5)."""
+        if qubo.n == 0:
+            return None
+        lp = _linear_solve(
+            instance.securities,
+            instance.required_collateral,
+            instance.minimum_hqla,
+            instance.concentration,
+            integer=False,
+        )
+        if not lp.feasible or lp.allocation is None:
+            return None
+        biases = [float(lp.allocation.x.get(s.id, 0.0)) for s in instance.securities]
+        biases += [0.5] * (qubo.n - len(biases))
+        return biases

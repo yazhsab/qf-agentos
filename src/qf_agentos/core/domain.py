@@ -116,6 +116,11 @@ class ProblemDomain(DomainBase):
         self, instance: ProblemInstance, result: SolveResult
     ) -> VerificationReport: ...
 
+    def instance_warm_start(self, instance: ProblemInstance, qubo: Qubo) -> list[float] | None:
+        """Per-qubit biases in [0,1] (length qubo.n) from a classical relaxation,
+        for warm-start QAOA. Default: no warm start."""
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Classification (quantum kernels)

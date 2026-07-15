@@ -46,7 +46,7 @@ def quantum_algorithm_agent(ctx: RunContext) -> str:
         reps=pol.qaoa_reps,
         mixer="transverse-field X",
         optimizer="COBYLA (multi-restart)",
-        warm_start="LP-rounding warm start available (roadmap)",
+        warm_start="Egger warm-start from the classical relaxation (active)",
         alternatives_considered=[
             "D-Wave hybrid (needs credentials)",
             "IBM QPU (needs credentials)",
@@ -70,7 +70,13 @@ def execution_agent(ctx: RunContext) -> str:
 
     domain = get_domain(spec.problem)
     assert isinstance(domain, ProblemDomain)
-    config = QuboRunConfig(seed=pol.seed, shots=pol.shots, reps=pol.qaoa_reps)
+    warm_start = domain.instance_warm_start(instance, qubo)
+    config = QuboRunConfig(
+        seed=pol.seed,
+        shots=pol.shots,
+        reps=pol.qaoa_reps,
+        warm_start=tuple(warm_start) if warm_start is not None else None,
+    )
     ran: list[str] = []
 
     # 1. Classical optimum on the SAME instance (all constraints) — fair comparator.

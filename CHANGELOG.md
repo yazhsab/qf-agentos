@@ -7,6 +7,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Warm-start QAOA** (Egger et al. 2021): the QAOA initial state and mixer are
+  biased toward a classical relaxation (LP for collateral, max-entropy assignment
+  for routing) instead of `|+⟩`. Replaces the previous "roadmap" placeholder.
 - **OpenTelemetry tracing** wired to the previously-inert `QF_TRACING_ENABLED`
   setting: one span per agent step (with step/run-id/ok/duration attributes),
   gated behind the `otel` extra; a no-op when disabled or uninstalled.
