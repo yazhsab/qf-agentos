@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
@@ -75,4 +77,62 @@ def set_run_id(run_id: str | None) -> None:
     _run_id_var.set(run_id)
 
 
-__all__ = ["configure_logging", "get_logger", "set_run_id"]
+# ---------------------------------------------------------------------------
+# Optional OpenTelemetry tracing (per-agent-step spans)
+# ---------------------------------------------------------------------------
+
+_tracing_enabled = False
+_tracer: Any = None
+_provider_set = False
+_sdk_provider: Any = None
+
+
+def configure_tracing(
+    enabled: bool, *, service_name: str = "qf-agentos", exporter: Any = None
+) -> None:
+    """Enable OpenTelemetry tracing if requested and the ``otel`` extra is present.
+
+    A no-op when disabled; logs a warning (and stays disabled) if enabled without
+    OpenTelemetry installed. Idempotent — the provider is installed once.
+    """
+    global _tracing_enabled, _tracer, _provider_set, _sdk_provider
+    if not enabled:
+        _tracing_enabled = False
+        return
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    except Exception:
+        get_logger("observability").warning(
+            "QF_TRACING_ENABLED is set but OpenTelemetry is not installed "
+            "(pip install 'qf-agentos[otel]'); tracing stays off."
+        )
+        _tracing_enabled = False
+        return
+
+    if not _provider_set:
+        _sdk_provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+        _sdk_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        trace.set_tracer_provider(_sdk_provider)
+        _provider_set = True
+    if exporter is not None and _sdk_provider is not None:  # e.g. in-memory exporter for tests
+        _sdk_provider.add_span_processor(BatchSpanProcessor(exporter))
+    _tracer = trace.get_tracer("qf_agentos")
+    _tracing_enabled = True
+
+
+@contextmanager
+def span(name: str, **attributes: Any) -> Iterator[Any]:
+    """Start a tracing span if tracing is active; otherwise a no-op."""
+    if not _tracing_enabled or _tracer is None:
+        yield None
+        return
+    with _tracer.start_as_current_span(name) as current:
+        for key, value in attributes.items():
+            current.set_attribute(key, value)
+        yield current
+
+
+__all__ = ["configure_logging", "configure_tracing", "get_logger", "set_run_id", "span"]

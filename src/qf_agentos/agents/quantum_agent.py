@@ -46,7 +46,7 @@ def quantum_algorithm_agent(ctx: RunContext) -> str:
         reps=pol.qaoa_reps,
         mixer="transverse-field X",
         optimizer="COBYLA (multi-restart)",
-        warm_start="LP-rounding warm start available (roadmap)",
+        warm_start="Egger warm-start from the classical relaxation (active)",
         alternatives_considered=[
             "D-Wave hybrid (needs credentials)",
             "IBM QPU (needs credentials)",
@@ -70,7 +70,16 @@ def execution_agent(ctx: RunContext) -> str:
 
     domain = get_domain(spec.problem)
     assert isinstance(domain, ProblemDomain)
-    config = QuboRunConfig(seed=pol.seed, shots=pol.shots, reps=pol.qaoa_reps)
+    warm_start = domain.instance_warm_start(instance, qubo)
+    config = QuboRunConfig(
+        seed=pol.seed,
+        shots=pol.shots,
+        reps=pol.qaoa_reps,
+        warm_start=tuple(warm_start) if warm_start is not None else None,
+        noisy=pol.noisy_simulation,
+        noise_two_qubit_error=pol.noise_two_qubit_error,
+        readout_error=pol.readout_error,
+    )
     ran: list[str] = []
 
     # 1. Classical optimum on the SAME instance (all constraints) — fair comparator.
@@ -169,6 +178,38 @@ def execution_agent(ctx: RunContext) -> str:
                 metadata=slim,
             )
             ran.append("qaoa_sim")
+
+            # Optional noisy-simulation pass (present-hardware feasibility). The
+            # HONEST degradation signal is the distribution MEAN energy (noise-
+            # sensitive), not the best-of-shots decoded solution.
+            if isinstance(raw, dict) and "noisy_best_bits" in raw:
+                ideal_mean = raw.get("sample_mean_energy")
+                noisy_mean = raw.get("noisy_mean_energy")
+                degradation = (
+                    noisy_mean - ideal_mean
+                    if (ideal_mean is not None and noisy_mean is not None)
+                    else None
+                )
+                noisy_meta = {
+                    "noise_model": raw.get("noise_model"),
+                    "mean_energy_ideal": ideal_mean,
+                    "mean_energy_noisy": noisy_mean,
+                    "mean_energy_mitigated": raw.get("mitigated_mean_energy"),
+                    "mean_energy_degradation": degradation,
+                    "decoded_best_energy_ideal": sol.energy,
+                    "decoded_best_energy_noisy": raw.get("noisy_best_energy"),
+                    "note": "Degradation is measured by the distribution MEAN energy; "
+                    "best-of-shots decoding stays feasible but is not a noise-robust metric.",
+                }
+                ctx.state.instance_qaoa_noisy = domain.evaluate_bits(
+                    instance,
+                    raw["noisy_best_bits"],
+                    method="qaoa_noisy_sim",
+                    kind="quantum",
+                    backend="noisy_statevector_sim",
+                    metadata=noisy_meta,
+                )
+                ran.append("qaoa_noisy_sim")
         else:
             ctx.warn(f"QAOA not executed: {auth.reason}")
     else:

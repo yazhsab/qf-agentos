@@ -654,3 +654,22 @@ class PaymentRoutingDomain(ProblemDomain):
         self, instance: PaymentInstance, result: SolveResult
     ) -> VerificationReport:
         return self._verify(result, instance.transactions, instance.routes, instance.routing)
+
+    def instance_warm_start(  # type: ignore[override]
+        self, instance: PaymentInstance, qubo: Qubo
+    ) -> list[float] | None:
+        """Warm-start: spread each transaction's mass uniformly over its eligible
+        routes (a max-entropy assignment respecting eligibility)."""
+        if qubo.n == 0:
+            return None
+        txs, routes = instance.transactions, instance.routes
+        r_n = len(routes)
+        biases = [0.0] * qubo.n
+        for t, tx in enumerate(txs):
+            elig = [r for r, route in enumerate(routes) if is_eligible(tx, route.id)]
+            if not elig:
+                continue
+            w = 1.0 / len(elig)
+            for r in elig:
+                biases[t * r_n + r] = w
+        return biases

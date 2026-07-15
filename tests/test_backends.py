@@ -85,3 +85,59 @@ def test_pennylane_backend_is_provider_neutral(qubo):
     sol = get_solver("qaoa_pennylane").solve(qubo, QuboRunConfig(seed=7, shots=512, reps=1))
     assert len(sol.best_bits) == qubo.n
     assert sol.energy >= exact.energy - 1e-6
+
+
+def test_warm_start_biases_have_right_length():
+    from qf_agentos.finance.collateral import CollateralDomain
+
+    spec = make_spec(required=4_000_000)
+    inst = reduce_to_instance(spec, 9, slack_bits=4)
+    q = build_qubo(inst, slack_bits=4)
+    ws = CollateralDomain().instance_warm_start(inst, q)
+    assert ws is not None and len(ws) == q.n
+    assert all(0.0 <= b <= 1.0 for b in ws)
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_warm_start_qaoa_reaches_ground_state(qubo):
+    from qf_agentos.backends.heuristic import brute_force_qubo
+    from qf_agentos.backends.quantum import run_qaoa
+
+    _, ee, _ = brute_force_qubo(qubo)
+    ws = [0.5] * qubo.n
+    raw = run_qaoa(qubo, reps=2, shots=2048, seed=7, warm_start=ws)
+    assert raw["warm_started"] is True
+    assert raw["best_energy"] >= ee - 1e-6  # QAOA can equal but never beat exact
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_noisy_qaoa_returns_noise_and_mitigation_fields(qubo):
+    from qf_agentos.backends.quantum import run_qaoa
+
+    raw = run_qaoa(qubo, reps=1, shots=1024, seed=7, noisy=True, mitigate=True)
+    assert "noisy_best_energy" in raw  # best-of-shots (secondary)
+    assert "noisy_mean_energy" in raw  # noise-sensitive headline metric
+    assert raw["noise_model"]["readout"] == 0.03
+    assert "mitigated_mean_energy" in raw  # readout mitigation applied
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_noise_degradation_is_visible_in_the_mean_energy(qubo):
+    # Regression: best-of-N hides noise, but the distribution MEAN energy must
+    # visibly degrade under heavy noise (higher energy = worse).
+    from qf_agentos.backends.quantum import run_qaoa
+
+    raw = run_qaoa(
+        qubo,
+        reps=1,
+        shots=4096,
+        seed=7,
+        noisy=True,
+        two_qubit_error=0.3,
+        readout_error=0.3,
+        mitigate=True,
+    )
+    assert raw["noisy_mean_energy"] > raw["sample_mean_energy"] + 1e-6

@@ -67,7 +67,17 @@ class QaoaSimSolver:
     def solve(self, qubo: Qubo, config: QuboRunConfig) -> QuboSolution:
         from .quantum import run_qaoa
 
-        raw = run_qaoa(qubo, reps=config.reps, shots=config.shots, seed=config.seed)
+        ws = list(config.warm_start) if config.warm_start is not None else None
+        raw = run_qaoa(
+            qubo,
+            reps=config.reps,
+            shots=config.shots,
+            seed=config.seed,
+            warm_start=ws,
+            noisy=config.noisy,
+            two_qubit_error=config.noise_two_qubit_error,
+            readout_error=config.readout_error,
+        )
         return QuboSolution(
             best_bits=[int(b) for b in raw["best_bits"]],
             energy=float(raw["best_energy"]),
