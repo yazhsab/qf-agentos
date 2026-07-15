@@ -167,7 +167,7 @@ def _readout_mitigate(counts: dict[str, int], p: float, n: int, shots: int) -> C
     mvec = np.clip(tensor.reshape(2**n), 0.0, None)
     mvec = mvec / (mvec.sum() or 1.0)
     return Counter(
-        {format(i, f"0{n}b"): int(round(mvec[i] * shots)) for i in range(2**n) if mvec[i] > 1e-6}
+        {format(i, f"0{n}b"): round(mvec[i] * shots) for i in range(2**n) if mvec[i] > 1e-6}
     )
 
 
