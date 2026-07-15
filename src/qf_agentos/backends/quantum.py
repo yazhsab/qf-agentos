@@ -148,8 +148,12 @@ def _sample_statevector(isa: Any, params: np.ndarray, shots: int, seed: int) -> 
 
 
 def _readout_mitigate(counts: dict[str, int], p: float, n: int, shots: int) -> Counter[str]:
-    """Tensored inverse-confusion-matrix readout mitigation (symmetric error p)."""
-    if not 0 < p < 0.5 or n > 16 or shots == 0:
+    """Tensored inverse-confusion-matrix readout mitigation (symmetric error p).
+
+    Skipped for very high readout error (p close to 0.5) where 1/(1-2p) explodes and
+    the inverse is numerically meaningless; the raw noisy counts are returned instead.
+    """
+    if not 0 < p <= 0.4 or n > 16 or shots == 0:
         return Counter(counts)
     vec = np.zeros(2**n)
     for key, c in counts.items():
@@ -203,21 +207,30 @@ def _noisy_evaluate(
     result = sim.run(tqc, shots=shots, seed_simulator=int(seed)).result()
     noisy_counts = {k.replace(" ", ""): v for k, v in result.get_counts().items()}
 
-    n_best, n_energy, _ = _rank_bitstrings(qubo, Counter(noisy_counts))
+    # Report the DISTRIBUTION mean energy (noise-sensitive) as the headline metric.
+    # best-of-shots (min over the sampled support) is nearly noise-insensitive for
+    # small n with many shots — it would falsely imply noise is harmless — so it is
+    # kept only as a secondary decoded solution, not the degradation signal.
+    n_best, n_energy, ecache = _rank_bitstrings(qubo, Counter(noisy_counts))
+    total = int(sum(noisy_counts.values())) or 1
+    noisy_mean = sum(c * ecache[k] for k, c in noisy_counts.items()) / total
     out: dict[str, Any] = {
         "noisy_best_bits": n_best,
-        "noisy_best_energy": n_energy,
-        "noisy_shots": int(sum(noisy_counts.values())),
+        "noisy_best_energy": n_energy,  # best-of-shots (secondary; not noise-robust)
+        "noisy_mean_energy": float(noisy_mean),  # noise-sensitive headline metric
+        "noisy_shots": total,
         "noise_model": {"two_qubit_depolarising": two_qubit_error, "readout": readout_error},
     }
     if mitigate:
-        mit = _readout_mitigate(
-            noisy_counts, readout_error, qubo.n, int(sum(noisy_counts.values()))
-        )
+        mit = _readout_mitigate(noisy_counts, readout_error, qubo.n, total)
         if mit:
-            m_best, m_energy, _ = _rank_bitstrings(qubo, mit)
+            m_best, m_energy, mcache = _rank_bitstrings(qubo, mit)
+            m_total = int(sum(mit.values())) or 1
             out["mitigated_best_bits"] = m_best
             out["mitigated_best_energy"] = m_energy
+            out["mitigated_mean_energy"] = float(
+                sum(c * mcache[k] for k, c in mit.items()) / m_total
+            )
     return out
 
 

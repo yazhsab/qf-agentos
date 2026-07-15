@@ -117,6 +117,27 @@ def test_noisy_qaoa_returns_noise_and_mitigation_fields(qubo):
     from qf_agentos.backends.quantum import run_qaoa
 
     raw = run_qaoa(qubo, reps=1, shots=1024, seed=7, noisy=True, mitigate=True)
-    assert "noisy_best_energy" in raw
+    assert "noisy_best_energy" in raw  # best-of-shots (secondary)
+    assert "noisy_mean_energy" in raw  # noise-sensitive headline metric
     assert raw["noise_model"]["readout"] == 0.03
-    assert "mitigated_best_energy" in raw  # readout mitigation applied
+    assert "mitigated_mean_energy" in raw  # readout mitigation applied
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_noise_degradation_is_visible_in_the_mean_energy(qubo):
+    # Regression: best-of-N hides noise, but the distribution MEAN energy must
+    # visibly degrade under heavy noise (higher energy = worse).
+    from qf_agentos.backends.quantum import run_qaoa
+
+    raw = run_qaoa(
+        qubo,
+        reps=1,
+        shots=4096,
+        seed=7,
+        noisy=True,
+        two_qubit_error=0.3,
+        readout_error=0.3,
+        mitigate=True,
+    )
+    assert raw["noisy_mean_energy"] > raw["sample_mean_energy"] + 1e-6
