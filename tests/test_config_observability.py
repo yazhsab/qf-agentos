@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
+
 from qf_agentos.core.config import Settings, get_settings, reset_settings_cache
 from qf_agentos.core.observability import (
     configure_logging,
@@ -65,3 +67,31 @@ def test_configure_logging_idempotent():
     n = len(logging.getLogger("qf_agentos").handlers)
     configure_logging("INFO", "text")  # no-op without force
     assert len(logging.getLogger("qf_agentos").handlers) == n
+
+
+def test_span_is_noop_when_tracing_disabled():
+    from qf_agentos.core.observability import configure_tracing, span
+
+    configure_tracing(False)
+    with span("noop", k="v") as s:
+        assert s is None
+
+
+def test_tracing_captures_spans_with_in_memory_exporter():
+    pytest.importorskip("opentelemetry.sdk")
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from qf_agentos.core.observability import configure_tracing, span
+
+    exporter = InMemorySpanExporter()
+    configure_tracing(True, exporter=exporter)
+    try:
+        with span("agent.test", **{"qf.step": "test"}):
+            pass
+        from opentelemetry import trace
+
+        trace.get_tracer_provider().force_flush()
+        names = {s.name for s in exporter.get_finished_spans()}
+        assert "agent.test" in names
+    finally:
+        configure_tracing(False)

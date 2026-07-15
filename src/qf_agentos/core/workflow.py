@@ -23,7 +23,7 @@ from .artifacts import StepError
 from .config import Settings, get_settings
 from .errors import QFAgentOSError
 from .ir import ProblemSpec
-from .observability import get_logger, set_run_id
+from .observability import get_logger, set_run_id, span
 from .policy import PolicyEngine
 from .state import PipelineState
 
@@ -74,26 +74,36 @@ class Workflow:
         for name, step in self.steps:
             started = datetime.now(UTC).isoformat()
             t0 = time.perf_counter()
-            try:
-                summary = step(ctx)
-                dt = time.perf_counter() - t0
-                ctx.trace.append(TraceEvent(name, started, dt, summary, ok=True))
-                _logger.info("step %-20s ok  (%.1f ms) — %s", name, dt * 1000, summary)
-                if emit is not None:
-                    emit(name, summary)
-            except Exception as exc:
-                dt = time.perf_counter() - t0
-                etype = type(exc).__name__
-                msg = str(exc) if isinstance(exc, QFAgentOSError) else f"{etype}: {exc}"
-                ctx.state.errors.append(StepError(step=name, error_type=etype, message=msg))
-                ctx.trace.append(
-                    TraceEvent(name, started, dt, f"FAILED: {msg}", ok=False, error=msg)
-                )
-                _logger.error(
-                    "step %-20s FAILED: %s", name, msg, exc_info=not isinstance(exc, QFAgentOSError)
-                )
-                if emit is not None:
-                    emit(name, f"[failed] {msg}")
+            with span(f"agent.{name}", **{"qf.step": name, "qf.run_id": ctx.run_id}) as sp:
+                try:
+                    summary = step(ctx)
+                    dt = time.perf_counter() - t0
+                    ctx.trace.append(TraceEvent(name, started, dt, summary, ok=True))
+                    _logger.info("step %-20s ok  (%.1f ms) — %s", name, dt * 1000, summary)
+                    if sp is not None:
+                        sp.set_attribute("qf.ok", True)
+                        sp.set_attribute("qf.duration_ms", dt * 1000)
+                    if emit is not None:
+                        emit(name, summary)
+                except Exception as exc:
+                    dt = time.perf_counter() - t0
+                    etype = type(exc).__name__
+                    msg = str(exc) if isinstance(exc, QFAgentOSError) else f"{etype}: {exc}"
+                    ctx.state.errors.append(StepError(step=name, error_type=etype, message=msg))
+                    ctx.trace.append(
+                        TraceEvent(name, started, dt, f"FAILED: {msg}", ok=False, error=msg)
+                    )
+                    _logger.error(
+                        "step %-20s FAILED: %s",
+                        name,
+                        msg,
+                        exc_info=not isinstance(exc, QFAgentOSError),
+                    )
+                    if sp is not None:
+                        sp.set_attribute("qf.ok", False)
+                        sp.set_attribute("qf.error", msg)
+                    if emit is not None:
+                        emit(name, f"[failed] {msg}")
         _logger.info(
             "run finished: %d step(s), %d error(s)", len(self.steps), len(ctx.state.errors)
         )

@@ -7,6 +7,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **OpenTelemetry tracing** wired to the previously-inert `QF_TRACING_ENABLED`
+  setting: one span per agent step (with step/run-id/ok/duration attributes),
+  gated behind the `otel` extra; a no-op when disabled or uninstalled.
 - **REST API hardening**: optional API-key authentication (`X-API-Key`, enabled by
   setting `QF_API_KEYS`) on `/solve` and the run registry, plus per-client rate
   limiting on `/solve` (`QF_API_RATE_LIMIT_PER_MINUTE`). Open in dev mode with a

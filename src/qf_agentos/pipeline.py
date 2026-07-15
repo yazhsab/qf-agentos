@@ -27,7 +27,7 @@ from .agents.classification import (
 from .core.config import Settings, get_settings
 from .core.domain import TaskType
 from .core.ir import ProblemSpec
-from .core.observability import configure_logging
+from .core.observability import configure_logging, configure_tracing
 from .core.policy import PolicyEngine
 from .core.workflow import RunContext, Workflow
 from .finance import get_domain
@@ -92,6 +92,7 @@ def solve(
     """Run the full pipeline on a spec and return the completed RunContext."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
+    configure_tracing(settings.tracing_enabled)
     policy = PolicyEngine(spec.execution_policy, human_approved=human_approved)
     ctx = RunContext(
         spec=spec,
