@@ -24,8 +24,10 @@ from .errors import SpecError
 # Categorical Security attributes that may carry a concentration cap.
 ALLOWED_CONCENTRATION_ATTRS: frozenset[str] = frozenset({"issuer", "counterparty"})
 
-# Guard-rail against resource-exhaustion via absurdly large inputs.
+# Guard-rails against resource-exhaustion via absurdly large inputs.
 MAX_INVENTORY = 100_000
+MAX_TRANSACTIONS = 100_000
+MAX_ROUTES = 1_000
 
 
 class AutonomyLevel(str, Enum):
@@ -44,6 +46,7 @@ class AutonomyLevel(str, Enum):
 
 class ObjectiveType(str, Enum):
     minimise_collateral_cost = "minimise_collateral_cost"
+    minimise_routing_cost = "minimise_routing_cost"
 
 
 class Security(BaseModel):
@@ -109,6 +112,66 @@ class Constraints(BaseModel):
         return v
 
 
+# ---------------------------------------------------------------------------
+# Payment-routing problem family
+# ---------------------------------------------------------------------------
+
+
+class PaymentRoute(BaseModel):
+    """A candidate route (acquirer / processor / network path) for payments."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str = ""
+    cost_bps: float = Field(default=0.0, ge=0, description="Processing cost, bps of amount.")
+    fixed_fee: float = Field(default=0.0, ge=0, description="Per-transaction fixed fee (currency).")
+    approval_rate: float = Field(gt=0, le=1, description="Probability of approval on this route.")
+    fraud_bps: float = Field(default=0.0, ge=0, description="Expected fraud loss, bps of amount.")
+    latency_ms: float = Field(default=0.0, ge=0)
+    capacity: int = Field(
+        default=1_000_000, ge=0, description="Max transactions this route accepts."
+    )
+    network: str = Field(default="DEFAULT", description="Network/rail, for diversification limits.")
+
+
+class Transaction(BaseModel):
+    """One payment transaction to route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    amount: float = Field(gt=0)
+    eligible_routes: list[str] = Field(
+        default_factory=list,
+        description="Route ids this transaction may use; empty means all routes.",
+    )
+
+
+class RoutingConstraints(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decline_penalty_bps: float = Field(
+        default=0.0, ge=0, description="Cost of a decline (lost margin/retry), bps of amount."
+    )
+    latency_weight: float = Field(
+        default=0.0, ge=0, description="Currency cost per millisecond of latency."
+    )
+    network_concentration: float | None = Field(
+        default=None, description="Max share of transactions routed to any one network, in (0,1]."
+    )
+    min_overall_approval: float | None = Field(
+        default=None, description="Floor on the portfolio expected approval rate, in (0,1]."
+    )
+
+    @field_validator("network_concentration", "min_overall_approval")
+    @classmethod
+    def _in_unit_interval(cls, v: float | None) -> float | None:
+        if v is not None and not 0.0 < v <= 1.0:
+            raise ValueError(f"must be in (0, 1], got {v}")
+        return v
+
+
 class ExecutionPolicy(BaseModel):
     """Policy the agents must obey. Governs backends, budget, and autonomy."""
 
@@ -130,32 +193,72 @@ class ExecutionPolicy(BaseModel):
 
 
 class ProblemSpec(BaseModel):
-    """Top-level, validated financial problem specification."""
+    """Top-level, validated financial problem specification.
+
+    Problem-family fields are optional; the ``problem`` discriminator selects
+    which block is required and validated. New families add their own block.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     problem: str = "collateral_allocation"
     objective: Objective = Field(default_factory=Objective)
-    constraints: Constraints
     execution_policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
+
+    # collateral_allocation
+    constraints: Constraints | None = None
     inventory: list[Security] = Field(default_factory=list)
+
+    # payment_routing
+    routing: RoutingConstraints | None = None
+    transactions: list[Transaction] = Field(default_factory=list)
+    routes: list[PaymentRoute] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate(self) -> ProblemSpec:
-        if self.problem != "collateral_allocation":
+        if self.problem == "collateral_allocation":
+            if self.constraints is None:
+                raise ValueError("collateral_allocation requires a 'constraints' block.")
+            if len(self.inventory) > MAX_INVENTORY:
+                raise ValueError(
+                    f"Inventory has {len(self.inventory)} securities; the maximum is {MAX_INVENTORY}."
+                )
+            ids = [s.id for s in self.inventory]
+            if len(ids) != len(set(ids)):
+                raise ValueError("Inventory security ids must be unique.")
+        elif self.problem == "payment_routing":
+            if self.routing is None:
+                raise ValueError("payment_routing requires a 'routing' block.")
+            if not self.routes:
+                raise ValueError("payment_routing requires at least one route.")
+            if len(self.routes) > MAX_ROUTES:
+                raise ValueError(
+                    f"Too many routes ({len(self.routes)}); the maximum is {MAX_ROUTES}."
+                )
+            if len(self.transactions) > MAX_TRANSACTIONS:
+                raise ValueError(
+                    f"Too many transactions ({len(self.transactions)}); the maximum is {MAX_TRANSACTIONS}."
+                )
+            rids = [r.id for r in self.routes]
+            if len(rids) != len(set(rids)):
+                raise ValueError("Route ids must be unique.")
+            tids = [t.id for t in self.transactions]
+            if len(tids) != len(set(tids)):
+                raise ValueError("Transaction ids must be unique.")
+            route_set = set(rids)
+            for t in self.transactions:
+                for rid in t.eligible_routes:
+                    if rid not in route_set:
+                        raise ValueError(
+                            f"Transaction '{t.id}' lists unknown eligible route '{rid}'."
+                        )
+        else:
             raise ValueError(
-                f"This release only implements 'collateral_allocation', got '{self.problem}'."
+                f"Unknown problem '{self.problem}'. Known: collateral_allocation, payment_routing."
             )
-        if len(self.inventory) > MAX_INVENTORY:
-            raise ValueError(
-                f"Inventory has {len(self.inventory)} securities; the maximum is {MAX_INVENTORY}."
-            )
-        ids = [s.id for s in self.inventory]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Inventory security ids must be unique.")
         return self
 
-    # ---- Derived, cached-free convenience views -------------------------------
+    # ---- Derived, cached-free convenience views (collateral) ------------------
 
     @property
     def eligible_inventory(self) -> list[Security]:

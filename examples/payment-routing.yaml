@@ -1,0 +1,43 @@
+# QF-AgentOS — payment-routing optimisation (generalized assignment problem).
+#
+#   qf-agent solve examples/payment-routing.yaml
+#
+# Route each transaction to exactly one eligible route to minimise total expected
+# cost (processing + fixed fee + expected fraud + latency + expected decline cost)
+# subject to per-route capacity, network diversification, and an approval floor.
+
+problem: payment_routing
+
+objective:
+  type: minimise_routing_cost
+
+routing:
+  decline_penalty_bps: 120       # cost of a decline (lost margin / retry), bps of amount
+  latency_weight: 0.0            # currency per millisecond of latency
+  network_concentration: 0.60    # no single network handles > 60% of transactions
+  min_overall_approval: 0.90     # portfolio expected approval rate floor
+
+execution_policy:
+  compare_classical: true
+  allow_quantum_annealing: true
+  allow_gate_model: true
+  max_qpu_budget_usd: 50
+  max_effective_qubits: 12       # 4 transactions x 3 routes on the research instance
+  autonomy_level: L2
+  qaoa_reps: 2
+  shots: 4096
+  seed: 7
+
+routes:
+  - { id: R_VISA, name: Visa direct,  cost_bps: 18, fixed_fee: 0.05, approval_rate: 0.94, fraud_bps: 4,  latency_ms: 120, capacity: 3, network: VISA }
+  - { id: R_MC,   name: Mastercard,   cost_bps: 20, fixed_fee: 0.04, approval_rate: 0.93, fraud_bps: 5,  latency_ms: 140, capacity: 3, network: MC }
+  - { id: R_ACQ,  name: Acquirer X,   cost_bps: 12, fixed_fee: 0.10, approval_rate: 0.88, fraud_bps: 9,  latency_ms: 90,  capacity: 2, network: ACQ }
+  - { id: R_ALT,  name: Alt rail,     cost_bps: 9,  fixed_fee: 0.02, approval_rate: 0.82, fraud_bps: 14, latency_ms: 300, capacity: 5, network: ALT }
+
+transactions:
+  - { id: T1, amount: 250000 }
+  - { id: T2, amount: 180000 }
+  - { id: T3, amount: 90000, eligible_routes: [R_VISA, R_MC] }   # scheme-restricted
+  - { id: T4, amount: 60000 }
+  - { id: T5, amount: 30000 }
+  - { id: T6, amount: 15000 }

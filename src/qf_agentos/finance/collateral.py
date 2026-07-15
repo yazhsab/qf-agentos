@@ -182,6 +182,7 @@ def _linear_solve(
 
 def solve_lp_relaxation(spec: ProblemSpec) -> LinearSolveOutput:
     cn = spec.constraints
+    assert cn is not None, "collateral spec requires a constraints block"
     return _linear_solve(
         spec.eligible_inventory,
         cn.required_collateral,
@@ -193,6 +194,7 @@ def solve_lp_relaxation(spec: ProblemSpec) -> LinearSolveOutput:
 
 def solve_binary_milp(spec: ProblemSpec) -> LinearSolveOutput:
     cn = spec.constraints
+    assert cn is not None, "collateral spec requires a constraints block"
     return _linear_solve(
         spec.eligible_inventory,
         cn.required_collateral,
@@ -236,6 +238,11 @@ class ResearchInstance:
         """Decision qubits (one per selected security), excluding slack bits."""
         return len(self.securities)
 
+    @property
+    def target(self) -> float:
+        """Representative target magnitude (the instance coverage requirement)."""
+        return self.required_collateral
+
 
 def reduce_to_instance(
     spec: ProblemSpec, max_qubits: int, *, slack_bits: int = SLACK_BITS_DEFAULT
@@ -248,12 +255,14 @@ def reduce_to_instance(
     than "post everything".
     """
     elig = spec.eligible_inventory
+    cn = spec.constraints
+    assert cn is not None, "collateral spec requires a constraints block"
     if not elig:
         return ResearchInstance(
             securities=[],
             required_collateral=0.0,
             minimum_hqla=0.0,
-            concentration=dict(spec.constraints.concentration),
+            concentration=dict(cn.concentration),
             degenerate=True,
             provenance={"reason": "no eligible securities in inventory"},
         )
@@ -269,22 +278,20 @@ def reduce_to_instance(
             securities=selected,
             required_collateral=0.0,
             minimum_hqla=0.0,
-            concentration=dict(spec.constraints.concentration),
+            concentration=dict(cn.concentration),
             degenerate=True,
             provenance={"reason": "selected securities have zero coverage"},
         )
 
     target = max(1.0, round(0.6 * total_cov))
     has_hqla = any(s.hqla for s in selected)
-    inst_min_hqla = (
-        round(0.25 * target) if (has_hqla and spec.constraints.minimum_hqla > 0) else 0.0
-    )
+    inst_min_hqla = round(0.25 * target) if (has_hqla and cn.minimum_hqla > 0) else 0.0
 
     return ResearchInstance(
         securities=selected,
         required_collateral=float(target),
         minimum_hqla=float(inst_min_hqla),
-        concentration=dict(spec.constraints.concentration),
+        concentration=dict(cn.concentration),
         provenance={
             "selection_rule": "coverage_per_unit_cost desc",
             "selected_from": len(elig),
@@ -511,3 +518,312 @@ def check_constraints(
 
     feasible = all(c.satisfied for c in checks)
     return feasible, float(total_cost), checks
+
+
+# ---------------------------------------------------------------------------
+# Domain adapter — plugs collateral allocation into the generic pipeline.
+# ---------------------------------------------------------------------------
+
+from ..core.artifacts import Formulation, FormulationCatalogue, RequirementsReport  # noqa: E402
+from ..core.domain import ClassicalBaseline, ProblemDomain  # noqa: E402
+from ..core.result import SolveResult, VerificationReport  # noqa: E402
+
+
+def _solve_result_from_output(
+    out: LinearSolveOutput, *, method: str, scope: str, backend: str, runtime_s: float
+) -> SolveResult:
+    return SolveResult(
+        method=method,
+        kind="classical",
+        backend=backend,
+        scope=scope,
+        feasible=out.feasible,
+        objective=out.objective,
+        allocation=out.allocation if out.allocation is not None else Allocation(x={}),
+        runtime_s=runtime_s,
+        metadata={"status": out.status},
+    )
+
+
+def _verify_alloc(
+    result: SolveResult,
+    securities: list[Security],
+    required: float,
+    minimum_hqla: float,
+    concentration: dict[str, float],
+) -> VerificationReport:
+    if result.allocation is None:
+        return VerificationReport(
+            method=result.method,
+            scope=result.scope,
+            feasible=False,
+            recomputed_objective=None,
+            objective_matches_solver=(result.objective is None),
+            notes=["No allocation to verify."],
+        )
+    feasible, obj, checks = check_constraints(
+        securities, result.allocation, required, minimum_hqla, concentration
+    )
+    matches = result.objective is None or abs(obj - result.objective) <= 1e-6 * max(1.0, abs(obj))
+    notes: list[str] = []
+    if not matches:
+        notes.append(
+            f"Solver reported objective {result.objective} but recomputation gives {obj:.4f}."
+        )
+    return VerificationReport(
+        method=result.method,
+        scope=result.scope,
+        feasible=feasible,
+        recomputed_objective=obj,
+        objective_matches_solver=matches,
+        checks=checks,
+        notes=notes,
+    )
+
+
+class CollateralDomain(ProblemDomain):
+    """Collateral allocation: minimise posting cost s.t. coverage / HQLA / concentration."""
+
+    problem = "collateral_allocation"
+
+    def requirements(self, spec: ProblemSpec) -> RequirementsReport:
+        cn = spec.constraints
+        assert cn is not None
+        eligible = spec.eligible_inventory
+        available = spec.total_available_coverage
+        required = cn.required_collateral
+        gaps: list[str] = []
+        if not spec.inventory:
+            gaps.append("Inventory is empty — no securities available to post.")
+        if not cn.concentration:
+            gaps.append("No concentration limits given — a single issuer could dominate the pool.")
+        if cn.minimum_hqla == 0:
+            gaps.append("No minimum HQLA floor given — pool liquidity is unconstrained.")
+        feasible_ub = available >= required
+        if not feasible_ub:
+            gaps.append(
+                f"Inventory post-haircut coverage {available:,.0f} < required {required:,.0f}: "
+                "the problem is infeasible as stated."
+            )
+        n_ineligible = len(spec.inventory) - len(eligible)
+        assumptions = (
+            [f"{n_ineligible} securities marked ineligible are excluded from posting."]
+            if n_ineligible
+            else []
+        )
+        return RequirementsReport(
+            problem=self.problem,
+            summary=(
+                f"{len(eligible)} eligible securities, required collateral {required:,.0f}, "
+                f"headroom {available - required:,.0f}"
+            ),
+            metrics={
+                "n_securities": float(len(spec.inventory)),
+                "n_eligible": float(len(eligible)),
+                "required_collateral": required,
+                "available_coverage": available,
+                "coverage_headroom": available - required,
+                "minimum_hqla": cn.minimum_hqla,
+            },
+            feasible_upper_bound=feasible_ub,
+            discovered_gaps=gaps,
+            assumptions=assumptions,
+            autonomy_level=spec.execution_policy.autonomy_level.value,
+        )
+
+    def formulations(self, spec: ProblemSpec) -> FormulationCatalogue:
+        n = len(spec.eligible_inventory)
+        return FormulationCatalogue(
+            catalogue=[
+                Formulation(
+                    name="continuous_lp",
+                    kind="Linear Program",
+                    variables=f"{n} continuous x_i in [0,1] (fraction posted)",
+                    represents="cost, coverage, HQLA floor, concentration — all exactly",
+                    note="Theoretical best; a lower bound on achievable cost.",
+                ),
+                Formulation(
+                    name="binary_milp",
+                    kind="Mixed-Integer Linear Program",
+                    variables=f"{n} binary x_i (post whole lot or nothing)",
+                    represents="cost, coverage, HQLA floor, concentration — all exactly",
+                    note="The FAIR classical comparator for any QUBO/QAOA result.",
+                ),
+                Formulation(
+                    name="qubo",
+                    kind="Quadratic Unconstrained Binary Optimisation",
+                    variables="binary x_i + slack bits on a reduced research instance",
+                    represents="cost + coverage (inequality via slack bits)",
+                    note="Concentration and HQLA become verification-only constraints.",
+                ),
+                Formulation(
+                    name="ising",
+                    kind="Ising Hamiltonian",
+                    variables="spins z_i in {+1,-1}, x_i = (1 - z_i)/2",
+                    represents="same content as the QUBO",
+                    note="Direct input to gate-model QAOA and to annealers.",
+                ),
+            ],
+            selected_classical="binary_milp",
+            selected_quantum_path="qubo -> ising -> QAOA",
+            encoding_loss_note=(
+                "The quantum path is a relaxation of a reduced instance. Any decoded "
+                "quantum solution is re-checked against the full instance constraints."
+            ),
+        )
+
+    def solve_classical_full(self, spec: ProblemSpec) -> ClassicalBaseline:
+        import time
+
+        t0 = time.perf_counter()
+        lp = solve_lp_relaxation(spec)
+        lp_dt = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        milp = solve_binary_milp(spec)
+        milp_dt = time.perf_counter() - t0
+
+        lp_res = _solve_result_from_output(
+            lp,
+            method="classical_lp_relaxation",
+            scope="full_problem",
+            backend="scipy/HiGHS",
+            runtime_s=lp_dt,
+        )
+        lp_res.metadata["role"] = "lower bound on cost"
+        milp_res = _solve_result_from_output(
+            milp,
+            method="classical_milp",
+            scope="full_problem",
+            backend="scipy/HiGHS",
+            runtime_s=milp_dt,
+        )
+        milp_res.metadata["role"] = "fair binary comparator / production recommendation"
+        milp_res.metadata["n_posted"] = (
+            len(milp.allocation.posted()) if milp.allocation is not None else 0
+        )
+        gap = (
+            milp.objective - lp.objective
+            if (
+                milp.feasible
+                and lp.feasible
+                and milp.objective is not None
+                and lp.objective is not None
+            )
+            else None
+        )
+        return ClassicalBaseline(milp=milp_res, lp=lp_res, integrality_gap=gap)
+
+    def reduce_to_instance(self, spec: ProblemSpec, max_qubits: int) -> ResearchInstance:
+        return reduce_to_instance(spec, max_qubits, slack_bits=SLACK_BITS_DEFAULT)
+
+    def build_qubo(self, instance: ResearchInstance, *, slack_bits: int) -> Qubo:  # type: ignore[override]
+        return build_qubo(instance, slack_bits=slack_bits)
+
+    def solve_instance_classical(self, instance: ResearchInstance) -> SolveResult:  # type: ignore[override]
+        import time
+
+        t0 = time.perf_counter()
+        out = solve_instance_milp(instance)
+        dt = time.perf_counter() - t0
+        if out.feasible and out.allocation is not None:
+            return self.evaluate_bits_alloc(
+                instance,
+                out.allocation,
+                method="instance_milp",
+                kind="classical",
+                backend="scipy/HiGHS",
+                runtime_s=dt,
+            )
+        return SolveResult(
+            method="instance_milp",
+            kind="classical",
+            backend="scipy/HiGHS",
+            scope="research_instance",
+            feasible=False,
+            objective=None,
+            allocation=Allocation(x={}),
+            runtime_s=dt,
+            metadata={"status": out.status},
+        )
+
+    def evaluate_bits(  # type: ignore[override]
+        self,
+        instance: ResearchInstance,
+        bits: NDArray[Any] | list[int],
+        *,
+        method: str,
+        kind: str,
+        backend: str,
+        runtime_s: float = 0.0,
+        qpu_time_s: float = 0.0,
+        cost_usd: float = 0.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> SolveResult:
+        alloc = bits_to_allocation([s.id for s in instance.securities], bits)
+        return self.evaluate_bits_alloc(
+            instance,
+            alloc,
+            method=method,
+            kind=kind,
+            backend=backend,
+            runtime_s=runtime_s,
+            qpu_time_s=qpu_time_s,
+            cost_usd=cost_usd,
+            metadata=metadata,
+        )
+
+    def evaluate_bits_alloc(
+        self,
+        instance: ResearchInstance,
+        alloc: Allocation,
+        *,
+        method: str,
+        kind: str,
+        backend: str,
+        runtime_s: float = 0.0,
+        qpu_time_s: float = 0.0,
+        cost_usd: float = 0.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> SolveResult:
+        feasible, obj, _ = check_constraints(
+            instance.securities,
+            alloc,
+            instance.required_collateral,
+            instance.minimum_hqla,
+            instance.concentration,
+        )
+        return SolveResult(
+            method=method,
+            kind=kind,
+            backend=backend,
+            scope="research_instance",
+            feasible=feasible,
+            objective=obj,
+            allocation=alloc,
+            runtime_s=runtime_s,
+            qpu_time_s=qpu_time_s,
+            cost_usd=cost_usd,
+            metadata=metadata or {},
+        )
+
+    def verify_full(self, spec: ProblemSpec, result: SolveResult) -> VerificationReport:
+        cn = spec.constraints
+        assert cn is not None
+        return _verify_alloc(
+            result,
+            spec.eligible_inventory,
+            cn.required_collateral,
+            cn.minimum_hqla,
+            cn.concentration,
+        )
+
+    def verify_instance(  # type: ignore[override]
+        self, instance: ResearchInstance, result: SolveResult
+    ) -> VerificationReport:
+        return _verify_alloc(
+            result,
+            instance.securities,
+            instance.required_collateral,
+            instance.minimum_hqla,
+            instance.concentration,
+        )

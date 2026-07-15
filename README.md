@@ -48,6 +48,7 @@ Requires Python ≥ 3.11.
 
 ```bash
 qf-agent solve   examples/collateral-allocation.yaml   # full pipeline + evidence bundle
+qf-agent solve   examples/payment-routing.yaml         # 2nd problem family (generalized assignment)
 qf-agent explain examples/collateral-allocation.yaml   # L0: understand + formulate only
 qf-agent plan    examples/collateral-allocation.yaml   # L1: experiment plan, no execution
 qf-agent solve   examples/abstention-demo.yaml         # honest quantum abstention
@@ -56,6 +57,18 @@ qf-agent runs                                          # list recorded runs
 qf-agent skills                                        # list installed Quantum Skills
 qf-agent serve                                         # run the REST API
 ```
+
+### Problem families
+
+The agent pipeline is problem-agnostic (a `ProblemDomain` abstraction); adding a
+family plugs into the same agents, backends, verification, audit, and governance.
+
+- **`collateral_allocation`** — minimise collateral posting cost s.t. coverage,
+  HQLA, and concentration limits (MILP + coverage-slack QUBO).
+- **`payment_routing`** — route transactions across candidate routes to minimise
+  expected cost (processing + fixed fee + fraud + latency + expected decline)
+  s.t. per-route capacity, network diversification, and an approval floor
+  (generalized assignment MILP + one-hot QUBO).
 
 ## SDK
 
