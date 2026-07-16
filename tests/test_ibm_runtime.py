@@ -270,3 +270,106 @@ def test_adapter_decodes_counts_with_mocked_runtime(monkeypatch, qubo):
         assert sampler_modes and sampler_modes[0].name == "fake"
     finally:
         reset_settings_cache()
+
+
+def _install_fake_runtime(monkeypatch, counts, *, usage=None, spans_duration=None):
+    """Mock the Qiskit Runtime so solve() runs offline with a chosen histogram."""
+    import qiskit
+    import qiskit_ibm_runtime as qir
+
+    class FakeService:
+        def __init__(self, **_kw):
+            pass
+
+        def backend(self, _n):
+            return SimpleNamespace(name="fake")
+
+        def least_busy(self, **_kw):
+            return SimpleNamespace(name="fake")
+
+    class FakeResult(list):
+        pass
+
+    item = SimpleNamespace(
+        data=SimpleNamespace(meas=SimpleNamespace(get_counts=lambda: counts)), metadata={}
+    )
+    result = FakeResult([item])
+    result.metadata = (
+        {"execution": {"execution_spans": SimpleNamespace(duration=spans_duration)}}
+        if spans_duration is not None
+        else {}
+    )
+
+    class FakeJob:
+        def result(self):
+            return result
+
+        def usage(self):
+            return usage
+
+    class FakeSampler:
+        def __init__(self, mode=None):
+            pass
+
+        def run(self, _c, shots=None):
+            return FakeJob()
+
+    monkeypatch.setattr(qir, "QiskitRuntimeService", FakeService)
+    monkeypatch.setattr(qir, "SamplerV2", FakeSampler)
+    monkeypatch.setattr(
+        qiskit, "generate_preset_pass_manager", lambda **_kw: SimpleNamespace(run=lambda c: c)
+    )
+    monkeypatch.setenv("QF_IBM_TOKEN", "dummy-token")
+    reset_settings_cache()
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_adapter_raises_backend_error_on_empty_counts(monkeypatch, qubo):
+    from qf_agentos.backends.ibm_runtime import IbmRuntimeQaoaSolver
+    from qf_agentos.core.errors import BackendError
+
+    _install_fake_runtime(monkeypatch, {})
+    try:
+        with pytest.raises(BackendError):
+            IbmRuntimeQaoaSolver().solve(qubo, QuboRunConfig(seed=7, reps=1, shots=256))
+    finally:
+        reset_settings_cache()
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_adapter_raises_backend_error_on_malformed_counts(monkeypatch, qubo):
+    from qf_agentos.backends.ibm_runtime import IbmRuntimeQaoaSolver
+    from qf_agentos.core.errors import BackendError
+
+    # A non-binary / wrong-width key must raise BackendError, not a raw ValueError,
+    # and must never silently decode to a wrong solution.
+    _install_fake_runtime(monkeypatch, {"0x1": 500, "1" * qubo.n: 500})
+    try:
+        with pytest.raises(BackendError):
+            IbmRuntimeQaoaSolver().solve(qubo, QuboRunConfig(seed=7, reps=1, shots=256))
+    finally:
+        reset_settings_cache()
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_qpu_seconds_prefers_usage_then_top_level_spans(monkeypatch, qubo):
+    from qf_agentos.backends.ibm_runtime import IbmRuntimeQaoaSolver
+
+    good = {"0" * qubo.n: 200, "1" + "0" * (qubo.n - 1): 56}
+    # (a) job.usage() present -> used directly.
+    _install_fake_runtime(monkeypatch, good, usage=3.0)
+    try:
+        sol = IbmRuntimeQaoaSolver().solve(qubo, QuboRunConfig(seed=7, reps=1, shots=256))
+        assert sol.qpu_time_s == pytest.approx(3.0)
+    finally:
+        reset_settings_cache()
+    # (b) usage None -> fall back to the TOP-level execution-spans duration.
+    _install_fake_runtime(monkeypatch, good, usage=None, spans_duration=4.2)
+    try:
+        sol = IbmRuntimeQaoaSolver().solve(qubo, QuboRunConfig(seed=7, reps=1, shots=256))
+        assert sol.qpu_time_s == pytest.approx(4.2)
+    finally:
+        reset_settings_cache()
