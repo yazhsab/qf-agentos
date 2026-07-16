@@ -28,7 +28,9 @@ ComplexArray = NDArray[np.complex128]
 
 
 def schmidt_values(psi: ComplexArray, n: int, cut: int) -> FloatArray:
-    """Normalised Schmidt coefficients across the bipartition (qubits <cut | >=cut)."""
+    """Normalised Schmidt coefficients across a contiguous bipartition of ``cut``
+    qubits vs the remaining ``n-cut`` (the entropy is symmetric, so which side is
+    which does not affect any reported metric)."""
     mat = psi.reshape(2**cut, 2 ** (n - cut))
     sv = np.linalg.svd(mat, compute_uv=False)
     norm = float(np.linalg.norm(sv)) or 1.0
@@ -43,9 +45,13 @@ def entanglement_entropy(schmidt: FloatArray) -> float:
 
 
 def bond_dimension_for_fidelity(schmidt: FloatArray, fidelity: float = 0.99) -> int:
-    """Smallest number of Schmidt values capturing >= ``fidelity`` of the weight."""
+    """Smallest number of Schmidt values capturing >= ``fidelity`` of the weight.
+
+    Clamped to the actual Schmidt rank: fidelity 1.0 (or float round-off above the
+    total weight) must never return a bond dimension larger than the rank.
+    """
     weight = np.cumsum(schmidt**2)
-    return int(np.searchsorted(weight, fidelity) + 1)
+    return min(int(np.searchsorted(weight, fidelity) + 1), len(schmidt))
 
 
 def truncated_mps_state(psi: ComplexArray, n: int, chi: int) -> ComplexArray:
@@ -94,11 +100,28 @@ def simulability_analysis(psi: ComplexArray, n: int, *, fidelity: float = 0.99) 
     chi_needed = max(chis) if chis else 1
     exact_max_bond = 2 ** (n // 2)
     mps_fid = truncated_mps_fidelity(psi, n, chi_needed)
-    # Simulable if the required bond dimension is far below the exact-rank maximum.
-    classically_simulable = chi_needed <= max(4, exact_max_bond // 2)
-
     mps_params = n * chi_needed * chi_needed * 2  # ~ O(n chi^2 d)
     statevector_params = 2**n
+
+    # "Efficiently classically simulable BY A TENSOR NETWORK" means the MPS actually
+    # compresses (a genuinely low-bond state), NOT merely that n is small. A state
+    # whose bond dimension reaches the exact-rank maximum needs an MPS at least as
+    # large as the statevector — no tensor-network advantage, regardless of n.
+    mps_compresses = mps_params < statevector_params
+    classically_simulable = bool(chi_needed < exact_max_bond and mps_compresses)
+
+    if classically_simulable:
+        note = (
+            "This circuit is CLASSICALLY SIMULABLE by a low-bond tensor network — an MPS "
+            "reproduces it with fewer parameters than the statevector, so it offers no quantum "
+            "advantage (cf. Vidal 2003)."
+        )
+    else:
+        note = (
+            "The MPS does NOT compress this state (bond dimension near the exact-rank maximum), "
+            "so a tensor network gives no advantage over exact statevector simulation — which "
+            "already solves this small instance classically. Not evidence of hardware advantage."
+        )
     return {
         "n_qubits": n,
         "max_entanglement_entropy_bits": max(entropies) if entropies else 0.0,
@@ -109,20 +132,13 @@ def simulability_analysis(psi: ComplexArray, n: int, *, fidelity: float = 0.99) 
         "mps_parameters": mps_params,
         "statevector_parameters": statevector_params,
         "compression_ratio": statevector_params / max(1, mps_params),
-        "classically_simulable": bool(classically_simulable),
+        "mps_compresses": mps_compresses,
+        "classically_simulable": classically_simulable,
         "verdict": (
             f"The QAOA output state needs bond dimension chi={chi_needed} for "
             f"{fidelity:.0%} fidelity (exact-rank max {exact_max_bond}); a bond-{chi_needed} "
             f"MPS reproduces it to fidelity {mps_fid:.4f} with ~{mps_params:,} parameters vs "
-            f"{statevector_params:,} amplitudes. "
-            + (
-                "This circuit is CLASSICALLY SIMULABLE by a tensor network — a classical MPS "
-                "matches it, so it offers no quantum advantage (cf. Vidal 2003)."
-                if classically_simulable
-                else "The bond dimension approaches the exact-rank maximum, so an MPS gives no "
-                "compression here — but that is a small-instance artefact, not evidence of "
-                "hardware advantage."
-            )
+            f"{statevector_params:,} amplitudes. " + note
         ),
     }
 
