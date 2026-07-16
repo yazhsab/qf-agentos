@@ -39,8 +39,13 @@ class Settings(BaseSettings):
     statevector_qubit_limit: int = Field(default=22, gt=0)
     bruteforce_qubit_limit: int = Field(default=20, gt=0)
 
-    # Governance
+    # Governance / experiment registry
     evidence_dir: Path = Path("evidence")
+    # Where solved runs are persisted: "file" (default, dependency-free) or
+    # "mlflow" (requires the 'mlflow' extra) for a shared experiment registry.
+    registry_backend: Literal["file", "mlflow"] = "file"
+    mlflow_tracking_uri: str | None = None  # None -> MLflow's default (./mlruns)
+    mlflow_experiment: str = "qf-agentos"
 
     # API safety: reject specs larger than this over the (synchronous) REST path,
     # so a single unauthenticated request cannot drive a huge classical solve.
@@ -50,6 +55,10 @@ class Settings(BaseSettings):
     # If empty, the API is OPEN (development mode) — a startup warning is logged.
     api_keys: str = Field(default="", description="Comma-separated API keys; empty = open.")
     api_rate_limit_per_minute: int = Field(default=60, gt=0)
+
+    # Async job queue behind POST /jobs (in-process thread pool; single instance).
+    api_job_workers: int = Field(default=2, gt=0, description="Concurrent solve workers.")
+    api_max_jobs: int = Field(default=256, gt=0, description="Retained job records (LRU).")
 
     # Credentials (never logged; loaded only when the matching backend runs)
     ibm_token: SecretStr | None = None

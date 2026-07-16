@@ -45,6 +45,8 @@ pennylane = ["pennylane>=0.35"]
 dwave = ["dwave-ocean-sdk>=7.0"]
 # REST API / service surface
 server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+# MLflow experiment registry (alternative to the file-based evidence store)
+mlflow = ["mlflow>=2.9"]
 # OpenTelemetry tracing
 otel = ["opentelemetry-api>=1.24", "opentelemetry-sdk>=1.24"]
 # Everything an experimenter typically wants
@@ -81,11 +83,14 @@ packages = ["src/qf_agentos"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/qf_agentos/py.typed" = "qf_agentos/py.typed"
+# Ship the example specs inside the package so QF-Studio can offer them as presets.
+"examples" = "qf_agentos/studio/examples"
 
 [tool.hatch.build]
 include = [
   "src/qf_agentos/**/*.py",
   "src/qf_agentos/**/*.yaml",
+  "src/qf_agentos/**/*.html",
   "src/qf_agentos/py.typed",
 ]
 

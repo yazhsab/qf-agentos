@@ -12,9 +12,12 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ..core.artifacts import EvidenceBundle
+
+if TYPE_CHECKING:
+    from ..core.config import Settings
 
 
 @dataclass
@@ -25,6 +28,18 @@ class RunRecord:
     recommended_method: str
     evidence_digest: str
     problem_infeasible: bool
+
+
+@runtime_checkable
+class EvidenceStoreProtocol(Protocol):
+    """The persistence interface the pipeline/API depend on. Both the file store
+    and the MLflow registry implement it, so they are drop-in interchangeable."""
+
+    def save(self, run_id: str, bundle: EvidenceBundle) -> Any: ...
+
+    def list_runs(self) -> list[RunRecord]: ...
+
+    def load_manifest(self, run_id: str) -> dict[str, Any] | None: ...
 
 
 class EvidenceStore:
@@ -77,4 +92,20 @@ class EvidenceStore:
         return data
 
 
-__all__ = ["EvidenceStore", "RunRecord"]
+def get_evidence_store(settings: Settings | None = None) -> EvidenceStoreProtocol:
+    """Return the configured evidence store: the file store (default) or the
+    MLflow registry when ``QF_REGISTRY_BACKEND=mlflow``."""
+    from ..core.config import get_settings
+
+    settings = settings or get_settings()
+    if settings.registry_backend == "mlflow":
+        from .mlflow_store import MLflowEvidenceStore
+
+        return MLflowEvidenceStore(
+            tracking_uri=settings.mlflow_tracking_uri,
+            experiment=settings.mlflow_experiment,
+        )
+    return EvidenceStore(settings.evidence_dir)
+
+
+__all__ = ["EvidenceStore", "EvidenceStoreProtocol", "RunRecord", "get_evidence_store"]
