@@ -82,12 +82,20 @@ class IbmRuntimeQaoaSolver:
         best_key = min(counts, key=lambda k: qubo_energy(qubo, _bits(k, n)))
         best_bits = _bits(best_key, n)
         qpu_time = _extract_qpu_seconds(result)
+        total_shots = sum(counts.values()) or 1
+        sample_mean = (
+            sum(qubo_energy(qubo, _bits(k, n)) * c for k, c in counts.items()) / total_shots
+        )
         return QuboSolution(
             best_bits=[int(b) for b in best_bits],
             energy=qubo_energy(qubo, best_bits),
             metadata={
                 "backend": getattr(backend, "name", "ibm"),
                 "shots": int(sum(counts.values())),
+                # Shot histogram + mean energy so the Verification agent can assess
+                # the quantum contribution, matching the simulator's metadata shape.
+                "counts": dict(counts),
+                "sample_mean_energy": float(sample_mean),
             },
             qpu_time_s=qpu_time,
         )

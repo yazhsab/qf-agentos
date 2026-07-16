@@ -203,12 +203,15 @@ def _render(
                 f"    - Runtime   : {inst_milp.runtime_s * 1000:.1f} ms",
             ]
         if qaoa is not None:
+            is_sim = (qaoa.backend or "").endswith("statevector_sim")
+            where = "statevector simulation" if is_sim else f"real hardware · {qaoa.backend}"
+            qpu_note = "(simulated)" if is_sim else "(real device)"
             lines += [
-                "  Quantum (QAOA, statevector simulation):",
+                f"  Quantum (QAOA, {where}):",
                 f"    - Objective              : {_fmt(qaoa.objective)}",
                 f"    - Feasible               : {q_feasible}",
                 f"    - Runtime                : {qaoa.runtime_s * 1000:.1f} ms",
-                f"    - QPU access time        : {qaoa.qpu_time_s:.3f} s (simulated)",
+                f"    - QPU access time        : {qaoa.qpu_time_s:.3f} s {qpu_note}",
                 f"    - Estimated cost         : ${qaoa.cost_usd:.2f}",
                 f"    - Reached QUBO optimum   : {reached_gs}",
                 f"    - Quantum contribution   : {contributed}",
