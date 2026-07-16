@@ -180,11 +180,20 @@
   function mdToHtml(md) {
     var lines = String(md).replace(/\r/g, "").split("\n");
     var out = [], i = 0;
+    function safeHref(url) {
+      // Allow only http(s), mailto, and same-page/relative links; block javascript:/data: etc.
+      var u = String(url).trim();
+      if (/^(https?:|mailto:)/i.test(u) || /^[/#]/.test(u) || /^[\w./-]+$/.test(u)) return u;
+      return "";
+    }
     function inline(t) {
       t = escapeHtml(t);
       t = t.replace(/`([^`]+)`/g, "<code>$1</code>");
       t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" rel="noopener">$1</a>');
+      t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, url) {
+        var href = safeHref(url);
+        return href ? '<a href="' + href + '" rel="noopener noreferrer">' + text + "</a>" : text;
+      });
       return t;
     }
     while (i < lines.length) {
