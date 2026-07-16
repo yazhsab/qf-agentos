@@ -25,7 +25,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi.responses import HTMLResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -33,12 +35,13 @@ from . import __version__
 from .api_jobs import JobManager, JobStatus
 from .backends.registry import discover_capabilities
 from .core.config import get_settings
-from .core.errors import QFAgentOSError
-from .core.ir import ProblemSpec
+from .core.errors import QFAgentOSError, SpecError
+from .core.ir import ProblemSpec, parse_spec
 from .core.observability import get_logger
 from .governance.store import get_evidence_store
 from .pipeline import solve as solve_spec
 from .skills import load_skills
+from .studio import list_example_specs, read_index_html
 
 _logger = get_logger("api")
 
@@ -149,6 +152,13 @@ class SolveResponse(BaseModel):
 class JobSubmitResponse(BaseModel):
     job_id: str
     status: str
+
+
+class StudioRunRequest(BaseModel):
+    """A Studio submission: a raw YAML/JSON spec the server validates + enqueues."""
+
+    spec_yaml: str
+    approve: bool = Field(default=False)
 
 
 class JobStatusResponse(BaseModel):
@@ -274,3 +284,45 @@ def job_status(job_id: str, _identity: str = Depends(authenticate)) -> JobStatus
         SolveResponse(**job.result) if job.status == JobStatus.SUCCEEDED and job.result else None
     )
     return JobStatusResponse(**job.summary(), result=result)
+
+
+# ---------------------------------------------------------------------------
+# QF-Studio (web UI)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def studio_home() -> HTMLResponse:
+    return HTMLResponse(read_index_html())
+
+
+@app.get("/examples")
+def examples() -> list[dict[str, Any]]:
+    return list_example_specs()
+
+
+@app.post("/studio/run", response_model=JobSubmitResponse, status_code=202)
+def studio_run(req: StudioRunRequest, _identity: str = Depends(rate_limit)) -> JobSubmitResponse:
+    """Validate a raw YAML/JSON spec (real validator) and enqueue an async solve."""
+    try:
+        data = yaml.safe_load(req.spec_yaml)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Spec must be a mapping.")
+    try:
+        spec = parse_spec(data)
+    except SpecError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    _check_size(spec)
+    request = SolveRequest(spec=spec, approve=req.approve)
+
+    def _work() -> dict[str, Any]:
+        try:
+            return _execute_solve(request).model_dump()
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+
+    job = _jobs().submit(_work, problem=spec.problem)
+    return JobSubmitResponse(job_id=job.id, status=job.status.value)

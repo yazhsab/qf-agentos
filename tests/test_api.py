@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+import yaml
 from fastapi.testclient import TestClient
 
 from qf_agentos.api import app
@@ -145,6 +146,51 @@ def test_jobs_require_api_key_when_configured(monkeypatch):
     finally:
         reset_settings_cache()
         _reset_rate_limiter()
+
+
+def test_studio_home_serves_html():
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "QF-AgentOS Studio" in r.text
+
+
+def test_studio_examples_endpoint():
+    r = client.get("/examples")
+    assert r.status_code == 200
+    presets = r.json()
+    assert isinstance(presets, list) and presets
+    problems = {p["problem"] for p in presets}
+    assert "collateral_allocation" in problems
+    assert all({"name", "problem", "yaml"} <= set(p) for p in presets)
+
+
+def test_studio_run_validates_and_solves():
+    from qf_test_utils import make_spec
+
+    spec_yaml = yaml.safe_dump(
+        make_spec(required=4_000_000, allow_gate_model=False).model_dump(mode="json")
+    )
+    r = client.post("/studio/run", json={"spec_yaml": spec_yaml})
+    assert r.status_code == 202
+    body = _poll_job(r.json()["job_id"])
+    assert body["status"] == "succeeded"
+    assert body["result"]["decision"]
+
+
+def test_studio_run_rejects_bad_yaml():
+    r = client.post("/studio/run", json={"spec_yaml": "problem: x\nfoo: ["})
+    assert r.status_code == 422
+
+
+def test_studio_run_rejects_non_mapping():
+    r = client.post("/studio/run", json={"spec_yaml": "- just\n- a\n- list"})
+    assert r.status_code == 422
+
+
+def test_studio_run_rejects_invalid_spec():
+    r = client.post("/studio/run", json={"spec_yaml": "problem: not_a_real_family"})
+    assert r.status_code == 422
 
 
 def test_runs_endpoint_returns_list():
