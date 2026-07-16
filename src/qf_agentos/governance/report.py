@@ -367,7 +367,7 @@ def _render_classification_model_card(ctx: RunContext) -> str:
             f"# Model Card — QF-AgentOS {spec.problem} run `{ctx.run_id}`\n",
             "## Intended use",
             "An experimentation harness comparing classical baselines against a quantum-kernel "
-            "classifier for fraud detection. Decision-support only — NOT an automated fraud "
+            f"classifier for the {spec.problem} task. Decision-support only — NOT an automated "
             "decisioning system, and NOT a claim that quantum ML outperforms classical.\n",
             "## Method",
             "- Classical baselines: logistic regression (IRLS) + RBF kernel-ridge classifier.",

@@ -397,14 +397,14 @@ class ProblemSpec(BaseModel):
                     raise ValueError(f"Obligation '{o.id}' has unknown payer '{o.payer}'.")
                 if o.payee not in pset:
                     raise ValueError(f"Obligation '{o.id}' has unknown payee '{o.payee}'.")
-        elif self.problem == "fraud_detection":
+        elif self.problem in ("fraud_detection", "rfq_fill"):
             cfg = self.classification
             if cfg is None:
-                raise ValueError("fraud_detection requires a 'classification' block.")
+                raise ValueError(f"{self.problem} requires a 'classification' block.")
             has_inline = bool(self.features) and bool(self.labels)
             if not has_inline and cfg.synthetic is None:
                 raise ValueError(
-                    "fraud_detection needs inline 'features'+'labels' or a "
+                    f"{self.problem} needs inline 'features'+'labels' or a "
                     "'classification.synthetic' block."
                 )
             if has_inline:
@@ -431,7 +431,7 @@ class ProblemSpec(BaseModel):
         else:
             raise ValueError(
                 f"Unknown problem '{self.problem}'. Known: collateral_allocation, "
-                "payment_routing, settlement_netting, fraud_detection."
+                "payment_routing, settlement_netting, fraud_detection, rfq_fill."
             )
         return self
 

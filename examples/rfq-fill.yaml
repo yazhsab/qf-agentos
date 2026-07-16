@@ -1,0 +1,40 @@
+# QF-AgentOS — RFQ fill prediction (quantum-kernel classification).
+#
+#   qf-agent solve examples/rfq-fill.yaml
+#
+# A market maker receives requests-for-quote (RFQs) and quotes a price; the client
+# either FILLS (trades) or walks. Predicting fill from features known at quote time
+# — quoted spread, order size, volatility, response latency, counterparty tier —
+# informs pricing and hedging. This is a binary classification problem, so it runs
+# on the SAME honest harness as fraud detection: strong classical baselines
+# (logistic regression + RBF kernel-ridge) versus a quantum ZZ-fidelity kernel on
+# the identical kernel-ridge learner and temporal holdout, judged by a bootstrap
+# significance test. Expected honest outcome on this synthetic data: the quantum
+# kernel does NOT beat the classical RBF kernel, so the auditor prefers classical.
+
+problem: rfq_fill
+
+objective:
+  type: maximise_detection_performance
+
+classification:
+  target_metric: auc            # AUC is robust to the fill-rate imbalance
+  test_fraction: 0.3            # temporal holdout: latest RFQs are the test set
+  feature_budget: 4            # qubits = features fed to the quantum kernel
+  rbf_gamma: 0.3
+  ridge_lambda: 0.01
+  bootstrap: 500               # bootstrap resamples for the significance CI
+  synthetic:
+    n_samples: 260
+    n_features: 6              # spread, size, volatility, latency, tier, time-of-day
+    n_informative: 3
+    class_balance: 0.35        # ~35% of RFQs fill
+    separability: 0.9
+
+execution_policy:
+  compare_classical: true
+  allow_gate_model: true
+  max_qpu_budget_usd: 0
+  max_effective_qubits: 4
+  autonomy_level: L2
+  seed: 7
