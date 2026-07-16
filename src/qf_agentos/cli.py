@@ -5,6 +5,7 @@ qf-agent explain examples/collateral-allocation.yaml     # L0: understand + form
 qf-agent plan    examples/collateral-allocation.yaml     # L1: experiment plan, no execution
 qf-agent skills                                          # list installed Quantum Skills
 qf-agent backends                                        # list backends + availability (incl. qaoa_ibm)
+qf-agent arena --out arena/                              # benchmark every family — honest leaderboard
 qf-agent serve                                           # run the REST API (needs the server extra)
 """
 
@@ -213,6 +214,55 @@ def backends() -> None:
         "[dim]Set QF_IBM_TOKEN (and QF_IBM_INSTANCE if needed) to enable qaoa_ibm; "
         "real hardware also needs autonomy L3 + --approve.[/]"
     )
+
+
+@app.command()
+def arena(
+    out: Path = typer.Option(None, "--out", "-o", help="Write arena.md + arena.json here."),
+) -> None:
+    """Benchmark every example problem across backends — an honest leaderboard."""
+    import json
+    from dataclasses import asdict
+
+    from .arena import load_example_specs, render_leaderboard, run_arena
+
+    specs = load_example_specs()
+    console.print(
+        f"[dim]Running QF-Arena on {len(specs)} problems (this solves each end-to-end)…[/]"
+    )
+    result = run_arena(specs)
+
+    table = Table(title="QF-Arena leaderboard")
+    for col in ("problem", "family", "classical", "quantum", "verdict", "helps"):
+        table.add_column(col)
+    for e in sorted(result.entries, key=lambda x: x.name):
+        cs = "—" if e.classical_score is None else f"{e.classical_score:,.4g}"
+        qs = "—" if e.quantum_score is None else f"{e.quantum_score:,.4g}"
+        table.add_row(
+            e.name,
+            e.problem,
+            f"{e.classical_method} {cs}",
+            f"{e.quantum_method or 'none'} {qs}",
+            e.verdict,
+            "[green]yes[/]" if e.quantum_helps else "[dim]no[/]",
+        )
+    console.print(table)
+    console.print(
+        f"[bold]{result.n} problems[/] · {result.n_advantage} quantum advantage · "
+        f"{result.n_parity} parity · {result.n_classical} classical preferred."
+    )
+    if result.n and result.n_advantage == 0:
+        console.print(
+            "[dim]Quantum does not beat the exact classical comparator on any problem — "
+            "parity at best. The honest result the platform is built to surface.[/]"
+        )
+    if out:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "arena.md").write_text(render_leaderboard(result))
+        (out / "arena.json").write_text(
+            json.dumps([asdict(e) for e in result.entries], indent=2, default=str)
+        )
+        console.print(f"Wrote {out}/arena.md and {out}/arena.json")
 
 
 @app.command()
