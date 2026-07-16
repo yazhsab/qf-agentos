@@ -6,6 +6,7 @@ qf-agent plan    examples/collateral-allocation.yaml     # L1: experiment plan, 
 qf-agent skills                                          # list installed Quantum Skills
 qf-agent backends                                        # list backends + availability (incl. qaoa_ibm)
 qf-agent arena --out arena/                              # benchmark every family — honest leaderboard
+qf-agent estimate --qubits 4                             # quantum amplitude estimation vs classical MC
 qf-agent serve                                           # run the REST API (needs the server extra)
 """
 
@@ -263,6 +264,71 @@ def arena(
             json.dumps([asdict(e) for e in result.entries], indent=2, default=str)
         )
         console.print(f"Wrote {out}/arena.md and {out}/arena.json")
+
+
+@app.command()
+def estimate(
+    qubits: int = typer.Option(4, "--qubits", "-m", help="Distribution qubits (2^m loss levels)."),
+    tail: float = typer.Option(
+        None, "--tail", help="Tail threshold t for a VaR-style P(loss>t); omit for expected loss."
+    ),
+    shots: int = typer.Option(200, help="Shots per Grover power."),
+    seed: int = typer.Option(7, help="Seed (deterministic)."),
+    out: Path = typer.Option(None, "--out", "-o", help="Write estimate.json here."),
+) -> None:
+    """Quantum Amplitude Estimation vs classical — an honest risk-estimation demo."""
+    from .finance.qae import (
+        classical_monte_carlo,
+        make_normal_loss_instance,
+        mlae,
+        quantum_available_for_qae,
+        resource_analysis,
+    )
+
+    if not quantum_available_for_qae():
+        console.print("[red]QAE needs qiskit: pip install 'qf-agentos[qiskit]'[/]")
+        raise typer.Exit(code=3)
+
+    inst = make_normal_loss_instance(qubits, tail_threshold=tail)
+    console.rule(f"[bold]QF-AgentOS estimate[/] · {inst.label} · {qubits} qubits")
+    r = mlae(inst, shots=shots, seed=seed)
+    mc, se = classical_monte_carlo(inst, r.oracle_calls, seed=seed)
+    ra = resource_analysis(inst)
+
+    table = Table(title=f"Amplitude estimation — {inst.label}")
+    for col in ("method", "estimate", "abs error", "queries"):
+        table.add_column(col)
+    table.add_row("exact (classical sum)", f"{r.exact:.6f}", "0", f"{2**qubits}")
+    table.add_row("QAE (MLAE)", f"{r.estimate:.6f}", f"{r.abs_error:.5f}", f"{r.oracle_calls:,}")
+    table.add_row(
+        "classical Monte Carlo", f"{mc:.6f}", f"{abs(mc - r.exact):.5f}", f"{r.oracle_calls:,}"
+    )
+    console.print(table)
+    console.print(
+        f"[dim]QAE query complexity O(1/ε) vs MC O(1/ε²): for RMSE {ra['target_rmse']:.0e}, "
+        f"{ra['qae_oracle_queries']:,} vs {ra['classical_mc_samples']:,} queries "
+        f"({ra['quadratic_query_ratio']:.0f}× fewer) — but state prep is "
+        f"{ra['state_preparation_gates']:,} gates (O(2^m)).[/]"
+    )
+    console.print(Panel(Text(ra["verdict"]), title="Honest verdict", border_style="yellow"))
+    if out:
+        import json
+
+        out.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "instance": inst.label,
+            "m_qubits": qubits,
+            "exact": r.exact,
+            "qae_estimate": r.estimate,
+            "qae_abs_error": r.abs_error,
+            "qae_oracle_calls": r.oracle_calls,
+            "mc_estimate": mc,
+            "mc_abs_error": abs(mc - r.exact),
+            "resource": ra,
+        }
+        (out / "estimate.json").write_text(json.dumps(payload, indent=2, default=str))
+        console.print(f"Wrote {out}/estimate.json")
+    console.print(f"[dim]{_DISCLAIMER}[/]")
 
 
 @app.command()
