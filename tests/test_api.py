@@ -193,6 +193,39 @@ def test_studio_run_rejects_invalid_spec():
     assert r.status_code == 422
 
 
+def test_studio_run_rejects_deeply_nested_yaml_without_500():
+    # RecursionError from yaml.safe_load must be a clean 4xx, never a 500.
+    payload = "a: " + "{a: " * 1500 + "1" + "}" * 1500
+    r = client.post("/studio/run", json={"spec_yaml": payload})
+    assert r.status_code in (400, 422)
+
+
+def test_studio_run_rejects_oversized_int_without_500():
+    # ValueError (int_max_str_digits) from parsing must be a clean 4xx, not a 500.
+    payload = "problem: collateral_allocation\nx: " + "9" * 5000
+    r = client.post("/studio/run", json={"spec_yaml": payload})
+    assert r.status_code in (400, 422)
+
+
+def test_size_guard_covers_all_families(monkeypatch):
+    from qf_agentos.core.config import reset_settings_cache
+    from qf_test_utils import make_fraud_spec, make_routing_spec, make_settlement_spec
+
+    monkeypatch.setenv("QF_API_MAX_INVENTORY", "3")
+    reset_settings_cache()
+    try:
+        # routing (4 routes), settlement (4 participants), fraud (160 synthetic samples)
+        for spec in (
+            make_routing_spec(allow_gate_model=False),
+            make_settlement_spec(allow_gate_model=False),
+            make_fraud_spec(allow_gate_model=False),
+        ):
+            body = {"spec": spec.model_dump(mode="json"), "persist": False}
+            assert client.post("/solve", json=body).status_code == 413
+    finally:
+        reset_settings_cache()
+
+
 def test_runs_endpoint_returns_list():
     r = client.get("/runs")
     assert r.status_code == 200

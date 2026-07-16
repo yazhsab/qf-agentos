@@ -10,10 +10,12 @@ FastAPI runs them in a worker threadpool and the event loop stays responsive.
 same work to a bounded async queue and returns a job id to poll at
 ``GET /jobs/{id}`` — the production path for long QAOA runs.
 
-Security: ``POST /solve``, ``POST /jobs`` and the run registry require an ``X-API-Key`` header
-when ``QF_API_KEYS`` is set (otherwise the API is open, for development, and a
-startup warning is logged). ``POST /solve`` is additionally rate-limited per
-client. Discovery endpoints (``/healthz``, ``/backends``, ``/skills``) are open.
+Security: ``POST /solve``, ``POST /jobs``, ``POST /studio/run`` and the run/job
+registries require an ``X-API-Key`` header when ``QF_API_KEYS`` is set (otherwise
+the API is open, for development, and a startup warning is logged). The three
+solve entry points are additionally rate-limited per client and size-guarded.
+Discovery endpoints (``/healthz``, ``/backends``, ``/skills``, ``/examples``) and
+the Studio page (``/``) are open.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import Any
 
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -83,6 +85,20 @@ app = FastAPI(
     description="Agentic quantum-finance: formulate, solve, verify, and audit.",
     lifespan=_lifespan,
 )
+
+
+@app.exception_handler(RecursionError)
+async def _too_deeply_nested(_request: Request, _exc: RecursionError) -> JSONResponse:
+    # Deeply-nested YAML/JSON bodies must be a clean 400, never an unhandled 500.
+    return JSONResponse(status_code=400, content={"detail": "request is too deeply nested"})
+
+
+@app.exception_handler(ValueError)
+async def _bad_value(_request: Request, _exc: ValueError) -> JSONResponse:
+    # A raw ValueError escaping request parsing (e.g. an oversized integer literal)
+    # is malformed input, not a server fault.
+    return JSONResponse(status_code=400, content={"detail": "malformed request value"})
+
 
 # ---------------------------------------------------------------------------
 # Auth + rate limiting
@@ -205,16 +221,34 @@ def run_manifest(run_id: str, _identity: str = Depends(authenticate)) -> dict[st
     return manifest
 
 
+def _spec_cost_size(spec: ProblemSpec) -> int:
+    """The largest solve-cost driver across every problem family."""
+    sizes = [
+        len(spec.inventory),
+        len(spec.transactions),
+        len(spec.obligations),
+        len(spec.routes),
+        len(spec.participants),
+    ]
+    cfg = spec.classification
+    if cfg is not None:
+        if spec.features:
+            sizes.append(len(spec.features))
+        elif cfg.synthetic is not None:
+            sizes.append(cfg.synthetic.n_samples)
+    return max(sizes)
+
+
 def _check_size(spec: ProblemSpec) -> None:
     """Bound the largest driver of solve cost over the API (413 if too big)."""
-    settings = get_settings()
-    n = max(len(spec.inventory), len(spec.transactions), len(spec.obligations))
-    if n > settings.api_max_inventory:
+    limit = get_settings().api_max_inventory
+    n = _spec_cost_size(spec)
+    if n > limit:
         raise HTTPException(
             status_code=413,
             detail=(
-                f"problem size {n} exceeds the API limit of "
-                f"{settings.api_max_inventory}. Use the CLI/SDK for larger problems."
+                f"problem size {n} exceeds the API limit of {limit}. "
+                "Use the CLI/SDK for larger problems."
             ),
         )
 
@@ -306,8 +340,10 @@ def studio_run(req: StudioRunRequest, _identity: str = Depends(rate_limit)) -> J
     """Validate a raw YAML/JSON spec (real validator) and enqueue an async solve."""
     try:
         data = yaml.safe_load(req.spec_yaml)
-    except yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}") from exc
+    except (yaml.YAMLError, RecursionError, ValueError) as exc:
+        # safe_load can raise RecursionError (deeply nested) or ValueError
+        # (oversized int literal), which are NOT yaml.YAMLError subclasses.
+        raise HTTPException(status_code=422, detail=f"Invalid spec: {exc}") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=422, detail="Spec must be a mapping.")
     try:

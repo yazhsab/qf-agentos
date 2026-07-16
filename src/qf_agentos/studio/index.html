@@ -171,8 +171,8 @@
   }
 
   function escapeHtml(s) {
-    return String(s).replace(/[&<>"]/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
 
@@ -181,9 +181,11 @@
     var lines = String(md).replace(/\r/g, "").split("\n");
     var out = [], i = 0;
     function safeHref(url) {
-      // Allow only http(s), mailto, and same-page/relative links; block javascript:/data: etc.
+      // Allow only http(s), mailto, same-page (#), and simple relative links;
+      // block javascript:/data:/vbscript: and protocol-relative (//host) links.
       var u = String(url).trim();
-      if (/^(https?:|mailto:)/i.test(u) || /^[/#]/.test(u) || /^[\w./-]+$/.test(u)) return u;
+      if (/^\/\//.test(u)) return "";
+      if (/^(https?:|mailto:)/i.test(u) || /^[#/]/.test(u) || /^[\w./-]+$/.test(u)) return u;
       return "";
     }
     function inline(t) {
@@ -271,7 +273,7 @@
     poller = setInterval(function () {
       api("/jobs/" + jobId).then(function (res) { return res.json(); }).then(function (job) {
         if (job.status === "queued" || job.status === "running") {
-          setStatus('<span class="spinner"></span> ' + job.status + "…");
+          setStatus('<span class="spinner"></span> ' + escapeHtml(job.status) + "…");
           return;
         }
         stopPolling();
