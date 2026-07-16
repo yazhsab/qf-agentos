@@ -35,6 +35,13 @@ def test_skills():
     assert "collateral-optimizer" in result.stdout
 
 
+def test_backends():
+    result = runner.invoke(app, ["backends"])
+    assert result.exit_code == 0
+    assert "qaoa_sim" in result.stdout
+    assert "qaoa_ibm" in result.stdout
+
+
 def test_explain(spec_file):
     result = runner.invoke(app, ["explain", str(spec_file())])
     assert result.exit_code == 0
