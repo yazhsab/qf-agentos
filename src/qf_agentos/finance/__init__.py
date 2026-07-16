@@ -11,6 +11,7 @@ KNOWN_PROBLEMS: tuple[str, ...] = (
     "payment_routing",
     "settlement_netting",
     "fraud_detection",
+    "rfq_fill",
 )
 
 
@@ -32,6 +33,10 @@ def get_domain(problem: str) -> DomainBase:
         from .fraud import FraudDetectionDomain
 
         return FraudDetectionDomain()
+    if problem == "rfq_fill":
+        from .rfq import RFQFillDomain
+
+        return RFQFillDomain()
     raise SpecError(f"Unknown problem '{problem}'. Known problems: {', '.join(KNOWN_PROBLEMS)}.")
 
 

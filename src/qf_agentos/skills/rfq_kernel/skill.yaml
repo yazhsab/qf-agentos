@@ -1,0 +1,30 @@
+name: rfq-fill-kernel
+version: 0.1.0
+summary: >
+  Predict whether a request-for-quote (RFQ) will be filled from features known at
+  quote time — quoted spread, order size, volatility, response latency,
+  counterparty tier. A binary classification problem run on the honest
+  quantum-kernel harness: strong classical baselines (logistic regression + RBF
+  kernel-ridge) versus a quantum ZZ-fidelity kernel on the SAME kernel-ridge
+  learner and temporal holdout, judged by a bootstrap significance test. Reports
+  whether the quantum kernel adds anything over classical — usually it does not.
+problem: rfq_fill
+inputs:
+  - features              # per-RFQ signals (or a synthetic generator config)
+  - labels                # 1 = filled, 0 = walked
+  - timestamps            # RFQ arrival time (temporal holdout)
+  - classification_policy # target_metric, test_fraction, feature_budget, rbf_gamma, ridge_lambda, bootstrap
+methods:
+  classical:
+    - logistic_regression
+    - rbf_kernel_ridge         # the FAIR comparator (same learner as quantum)
+  quantum:
+    - quantum_kernel_ridge     # ZZ feature-map fidelity kernel + kernel ridge
+verification:
+  - no_data_leakage            # train/test disjoint; train-only standardisation
+  - temporal_validity          # test RFQs strictly later than train
+  - objective_recomputation
+  - quantum_contribution       # bootstrap significance vs the RBF kernel
+autonomy:
+  simulator: L2
+  paid_qpu: L3
