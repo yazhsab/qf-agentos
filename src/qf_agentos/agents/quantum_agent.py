@@ -27,7 +27,10 @@ from ..core.workflow import RunContext
 from ..finance import get_domain
 
 # Maps the planner's abstract target to a concrete registry backend name.
-_TARGET_TO_BACKEND = {"gate_model_statevector_sim": "qaoa_sim"}
+_TARGET_TO_BACKEND = {
+    "gate_model_statevector_sim": "qaoa_sim",
+    "gate_model_ibm_runtime": "qaoa_ibm",
+}
 
 
 def quantum_algorithm_agent(ctx: RunContext) -> str:
@@ -166,18 +169,25 @@ def execution_agent(ctx: RunContext) -> str:
                 )
             }
             slim["qubo_energy"] = sol.energy
+            # Label the run by where it actually executed: the device name for real
+            # hardware, else the abstract target (statevector sim).
+            run_backend = (
+                str(raw.get("backend"))
+                if isinstance(raw, dict) and raw.get("backend")
+                else (plan.target or "gate_model_statevector_sim")
+            )
             ctx.state.instance_qaoa = domain.evaluate_bits(
                 instance,
                 sol.best_bits,
                 method=solver.name,
                 kind=solver.kind,
-                backend="gate_model_statevector_sim",
+                backend=run_backend,
                 runtime_s=dt,
                 qpu_time_s=sol.qpu_time_s,
                 cost_usd=sol.cost_usd,
                 metadata=slim,
             )
-            ran.append("qaoa_sim")
+            ran.append(solver.name)
 
             # Optional noisy-simulation pass (present-hardware feasibility). The
             # HONEST degradation signal is the distribution MEAN energy (noise-

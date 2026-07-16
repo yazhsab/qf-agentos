@@ -62,8 +62,11 @@ class Settings(BaseSettings):
 
     # Credentials (never logged; loaded only when the matching backend runs)
     ibm_token: SecretStr | None = None
-    ibm_instance: str | None = None
-    ibm_backend: str | None = None
+    # IBM Quantum Platform channel. The legacy "ibm_quantum" channel was retired;
+    # qiskit-ibm-runtime now accepts "ibm_quantum_platform" (default) or "ibm_cloud".
+    ibm_channel: str = "ibm_quantum_platform"
+    ibm_instance: str | None = None  # instance CRN / hub-group-project (optional)
+    ibm_backend: str | None = None  # pin a device; else least-busy is chosen
     dwave_token: SecretStr | None = None
 
     def has_ibm_credentials(self) -> bool:

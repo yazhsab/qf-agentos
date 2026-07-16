@@ -66,6 +66,27 @@ def hardware_planner_agent(ctx: RunContext) -> str:
     else:
         target = "gate_model_statevector_sim"
 
+    # Optionally route the FINAL optimised circuit to real IBM hardware (opt-in via
+    # execution_policy.qpu_backend="ibm"). Requires credentials; otherwise fall back
+    # to the simulator with a recorded reason. L3 + approval + budget are enforced
+    # later by the policy engine at the actual call site (RUN_PAID_QPU).
+    real_qpu = "not attempted (requires credentials + L3 approval + budget)"
+    estimated_cost = 0.0
+    if target == "gate_model_statevector_sim" and pol.qpu_backend == "ibm":
+        ibm_cap = next((c for c in caps if c.name == "qaoa_ibm"), None)
+        if ibm_cap is not None and ibm_cap.available:
+            target = "gate_model_ibm_runtime"
+            real_qpu = (
+                "IBM Quantum via Qiskit Runtime — final optimised circuit only "
+                "(parameters trained on the local simulator)"
+            )
+        else:
+            detail = ibm_cap.detail if ibm_cap is not None else "qaoa_ibm not registered"
+            reasons.append(
+                f"qpu_backend='ibm' requested but IBM is unavailable ({detail}); "
+                "running on the local simulator instead."
+            )
+
     est_two_qubit_depth = int(pol.qaoa_reps * n_pairs / max(1, total_qubits / 2))
 
     ctx.state.hardware_plan = HardwarePlan(
@@ -75,8 +96,8 @@ def hardware_planner_agent(ctx: RunContext) -> str:
         abstain=abstain,
         reasons=reasons,
         estimated_two_qubit_depth=est_two_qubit_depth,
-        estimated_cost_usd=0.0,  # simulator
-        real_qpu="not attempted (requires credentials + L3 approval + budget)",
+        estimated_cost_usd=estimated_cost,
+        real_qpu=real_qpu,
         capabilities=caps,
         encoding_losses=qubo.encoding_losses,
         instance_provenance=instance.provenance,
