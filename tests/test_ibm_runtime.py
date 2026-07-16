@@ -88,10 +88,17 @@ class _FakeIbmSolver:
 
     def solve(self, qubo, config: QuboRunConfig) -> QuboSolution:
         bits = [0] * qubo.n
+        counts = {"0" * qubo.n: 200, "1" + "0" * (qubo.n - 1): 56}
         return QuboSolution(
             best_bits=bits,
             energy=qubo_energy(qubo, bits),
-            metadata={"backend": "fake_ibm_device", "shots": 256, "n_qubits": qubo.n},
+            metadata={
+                "backend": "fake_ibm_device",
+                "shots": 256,
+                "counts": counts,
+                "sample_mean_energy": 0.0,
+                "n_qubits": qubo.n,
+            },
             qpu_time_s=1.25,
         )
 
@@ -134,6 +141,47 @@ def test_ibm_route_runs_with_l3_approval(monkeypatch):
         assert ctx.state.instance_qaoa is not None
         assert ctx.state.instance_qaoa.backend == "fake_ibm_device"
         assert ctx.state.instance_qaoa.qpu_time_s == pytest.approx(1.25)
+        # Verification must run end-to-end on the IBM result (no crash) and attribute
+        # the quantum contribution to qaoa_ibm (not qaoa_sim).
+        assert not ctx.state.errors
+        qrep = ctx.state.verification.get("qaoa_ibm")
+        assert qrep is not None and qrep.quantum_contribution is not None
+    finally:
+        reset_settings_cache()
+
+
+class _NoCountsIbmSolver(_FakeIbmSolver):
+    """A backend that returns a decoded solution but NO shot histogram."""
+
+    def solve(self, qubo, config: QuboRunConfig) -> QuboSolution:
+        bits = [0] * qubo.n
+        return QuboSolution(
+            best_bits=bits,
+            energy=qubo_energy(qubo, bits),
+            metadata={"backend": "fake_ibm_device", "shots": 0},
+            qpu_time_s=0.0,
+        )
+
+
+@pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
+@pytest.mark.slow
+def test_verification_survives_ibm_result_without_counts(monkeypatch):
+    # Regression: a real-QPU result whose metadata lacked counts crashed the
+    # verification agent (zero-size array). It must degrade gracefully instead.
+    from qf_agentos.agents import quantum_agent
+    from qf_agentos.backends.registry import get_solver as real_get_solver
+
+    monkeypatch.setenv("QF_IBM_TOKEN", "dummy-token")
+    reset_settings_cache()
+    monkeypatch.setattr(
+        quantum_agent,
+        "get_solver",
+        lambda name: _NoCountsIbmSolver() if name == "qaoa_ibm" else real_get_solver(name),
+    )
+    try:
+        ctx = solve(_ibm_spec(), human_approved=True)
+        assert ctx.state.instance_qaoa is not None
+        assert not ctx.state.errors  # the empty-counts guard prevents the crash
     finally:
         reset_settings_cache()
 
@@ -204,6 +252,9 @@ def test_adapter_decodes_counts_with_mocked_runtime(monkeypatch, qubo):
         assert len(sol.best_bits) == n
         assert sol.metadata["backend"] == "fake"
         assert sol.metadata["shots"] == 1000  # 700 + 300
+        # The shot histogram + mean energy are reported for the verification agent.
+        assert sol.metadata["counts"] == counts
+        assert "sample_mean_energy" in sol.metadata
         # The configured channel + token actually reach the runtime service...
         assert captured["channel"] == "ibm_cloud"
         assert captured["token"] == "dummy-token"

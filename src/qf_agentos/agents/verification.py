@@ -34,7 +34,25 @@ def _quantum_contribution(
     """Compare the QAOA measurement distribution to uniform random sampling."""
     n = qubo.n
     counts = qaoa.counts
-    total = sum(counts.values()) or 1
+    total = sum(counts.values())
+    if not counts or total == 0:
+        # A backend that returned no shot histogram (e.g. a real-QPU run whose
+        # metadata lacked counts) leaves nothing to assess — report "not measured"
+        # rather than reducing over an empty array.
+        return {
+            "shots": 0,
+            "contributed": False,
+            "reached_ground_state": False,
+            "qaoa_mean_energy": None,
+            "qaoa_min_energy": None,
+            "random_mean_energy": None,
+            "random_min_energy": None,
+            "exact_ground_energy": exact_energy,
+            "p_optimal_qaoa": float("nan"),
+            "p_optimal_random": float("nan"),
+            "verdict": "No measurement distribution returned by the backend; "
+            "quantum contribution could not be assessed from shots.",
+        }
 
     q_list: list[float] = []
     for key, c in counts.items():
@@ -103,15 +121,22 @@ def verification_agent(ctx: RunContext) -> str:
                 continue
             reports[res.method] = domain.verify_instance(instance, res)
 
-    if st.qaoa_raw is not None and not st.qaoa_raw.degenerate and st.qubo is not None:
+    # The QAOA sub-problem may have run on the simulator or on real hardware;
+    # attribute the contribution to whichever quantum method is present.
+    quantum_method = next((m for m in ("qaoa_sim", "qaoa_ibm") if m in reports), None)
+    if (
+        st.qaoa_raw is not None
+        and not st.qaoa_raw.degenerate
+        and st.qubo is not None
+        and quantum_method is not None
+    ):
         contrib = _quantum_contribution(
             st.qubo, st.qaoa_raw, st.qubo_exact_energy, spec.execution_policy.seed
         )
-        if "qaoa_sim" in reports:
-            reports["qaoa_sim"].quantum_contribution = contrib
-            reports["qaoa_sim"].notes.append(
-                f"QAOA reached QUBO ground state: {contrib['reached_ground_state']}."
-            )
+        reports[quantum_method].quantum_contribution = contrib
+        reports[quantum_method].notes.append(
+            f"QAOA reached QUBO ground state: {contrib['reached_ground_state']}."
+        )
 
     st.verification = reports
     st.reproducibility = ReproducibilityInfo(
@@ -121,8 +146,9 @@ def verification_agent(ctx: RunContext) -> str:
     )
 
     q_txt = ""
-    if "qaoa_sim" in reports and reports["qaoa_sim"].quantum_contribution:
-        contributed = reports["qaoa_sim"].quantum_contribution["contributed"]
-        q_txt = f" Quantum contribution: {'yes' if contributed else 'no'}."
+    if quantum_method is not None:
+        qc = reports[quantum_method].quantum_contribution
+        if qc:
+            q_txt = f" Quantum contribution: {'yes' if qc['contributed'] else 'no'}."
     feas = {m: r.feasible for m, r in reports.items()}
     return f"Verified {len(reports)} solution(s); feasibility {feas}.{q_txt}"

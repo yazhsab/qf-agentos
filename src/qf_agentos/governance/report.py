@@ -285,14 +285,16 @@ def _render_report(ctx: RunContext, manifest: dict[str, Any]) -> str:
             if rep.quantum_contribution:
                 qc = rep.quantum_contribution
                 L.append(f"- **Quantum-contribution accounting:** {qc['verdict']}")
-                L.append(
-                    f"  - QAOA mean energy {qc['qaoa_mean_energy']:.4f} vs random "
-                    f"{qc['random_mean_energy']:.4f}"
-                )
-                L.append(
-                    f"  - P(optimal) QAOA {qc['p_optimal_qaoa']:.3f} vs random {qc['p_optimal_random']:.3f}; "
-                    f"reached ground state: {qc['reached_ground_state']}"
-                )
+                if qc.get("qaoa_mean_energy") is not None:
+                    L.append(
+                        f"  - QAOA mean energy {qc['qaoa_mean_energy']:.4f} vs random "
+                        f"{qc['random_mean_energy']:.4f}"
+                    )
+                    L.append(
+                        f"  - P(optimal) QAOA {qc['p_optimal_qaoa']:.3f} vs random "
+                        f"{qc['p_optimal_random']:.3f}; reached ground state: "
+                        f"{qc['reached_ground_state']}"
+                    )
             L.append("")
 
     L.append("## 8. Quantum-Advantage Auditor (Agent 8)\n")
