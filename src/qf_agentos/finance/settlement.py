@@ -18,9 +18,14 @@ This plugs into the same agent pipeline as collateral allocation and payment
 routing via :class:`ProblemDomain`. The classical comparator is an exact binary
 MILP (HiGHS). The QUBO encodes the objective (settle value) **and** each
 participant's liquidity inequality via binary slack bits — so, unlike the other
-families where a capacity constraint is dropped, here the liquidity constraints
-are genuinely in the quantum sub-problem. The optional settled-value floor stays
-verification-only. The decoded batch is always re-checked exactly.
+families where a capacity constraint is dropped entirely, here the liquidity
+constraints are genuinely in the quantum sub-problem, as a SOFT penalty. Liquidity
+is a packing constraint, so a small overshoot is only weakly penalised: the QUBO
+ground state is approximately (not exactly) liquidity-feasible, which is itself
+concrete evidence that QUBO/QAOA is a poor fit for constrained settlement. The
+optional settled-value floor stays verification-only. The decoded batch is always
+re-checked EXACTLY against liquidity, so an infeasible batch is caught and never
+reported as feasible.
 """
 
 from __future__ import annotations
@@ -39,7 +44,8 @@ from ..core.ir import Obligation, Participant, ProblemSpec
 from ..core.result import Allocation, ConstraintCheck, SolveResult, VerificationReport
 from .collateral import LinearSolveOutput, Qubo
 
-# Binary slack bits *per participant* used to encode each liquidity inequality.
+# Max binary slack bits *per participant* used to encode each liquidity
+# inequality. The reducer uses as many as the qubit budget allows, capped here.
 SETTLEMENT_SLACK_BITS = 3
 _TOL = 1e-6
 
@@ -322,12 +328,23 @@ def build_settlement_qubo(instance: SettlementInstance) -> Qubo:
     b_t = {p.id: p.balance / scale for p in parts}
     lam = 1.0  # objective weight (settled value is in [0, 1])
 
-    # Penalty must dominate the objective so the ground state respects liquidity:
-    # settling the smallest obligation gains at most lam*min_step, so an equal-size
-    # liquidity breach must cost more than the whole (unit) objective budget.
+    # Penalty weight. ``penalty_scale`` is always honoured as a FLOOR (a user who
+    # raises it to strengthen the constraint is never silently overridden); the
+    # auto term is capped to keep the QAOA landscape numerically sane.
+    #
+    # IMPORTANT (encoding loss): liquidity is a *packing* constraint. Settling an
+    # obligation of amount ``a`` that overshoots a payer's remaining headroom by a
+    # small ``δ`` gains reward ~``a`` but costs only the quadratic penalty
+    # ``A·δ²``. Because ``δ`` can be arbitrarily small while ``a`` is large, NO
+    # moderate ``A`` makes the penalty dominate for every breach — guaranteeing a
+    # feasible ground state would need ``A ~ max_amount·total`` (which then swamps
+    # the objective and cripples QAOA). So the QUBO ground state can be slightly
+    # liquidity-infeasible; that is an inherent limitation of the penalty encoding
+    # for this problem, and the Verification agent catches it EXACTLY on the
+    # decoded batch (an infeasible batch is never reported feasible).
     min_step = float(a_t.min()) if p_n else 1.0
-    A = max(instance.penalty_scale, 2.5 / (min_step**2)) if min_step > 0 else instance.penalty_scale
-    A = min(A, 1000.0)
+    auto = min(2.5 / (min_step**2), 1000.0) if min_step > 0 else 0.0
+    A = max(instance.penalty_scale, auto)
 
     Q: dict[tuple[int, int], float] = {}
 
@@ -382,8 +399,15 @@ def build_settlement_qubo(instance: SettlementInstance) -> Qubo:
     if encode_liquidity:
         liq_note = (
             f"Each participant's liquidity inequality (net outflow <= balance) is encoded "
-            f"with {instance.slack_bits} binary slack bits; the QUBO ground state respects "
-            "liquidity when the penalty dominates."
+            f"with {instance.slack_bits} binary slack bits as a soft quadratic penalty. Liquidity "
+            "is a PACKING constraint, so a small overshoot (settling an obligation that exceeds a "
+            "payer's remaining headroom by a little) incurs only a small quadratic penalty while "
+            "still reaping the full settled-value reward — no tractable penalty weight fully "
+            "prevents this. The QUBO ground state is therefore only APPROXIMATELY "
+            "liquidity-feasible, so the decoded batch is ALWAYS re-checked against exact liquidity "
+            "by the Verification agent — an infeasible batch is caught there and never reported "
+            "feasible. (This lossy encoding is itself concrete evidence that QUBO/QAOA is a poor "
+            "fit for constrained settlement, where the exact classical MILP is strongly preferred.)"
         )
     else:
         liq_note = (

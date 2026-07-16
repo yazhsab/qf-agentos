@@ -143,6 +143,22 @@ def test_check_detects_liquidity_violation():
     assert unsettled == pytest.approx(0.0)  # everything was (wrongly) marked settled
 
 
+def test_infeasible_quantum_bits_are_never_reported_feasible():
+    # The honesty guarantee: the soft-penalty QUBO can return a liquidity-infeasible
+    # batch, but the decode path used on real QAOA output (evaluate_bits) re-checks
+    # exactly and reports it infeasible — an infeasible batch is never laundered as
+    # feasible. Settling ONLY O_AB overdraws BANK_A (out 100 > balance 10, no inflow).
+    spec = make_settlement_spec(max_qubits=12)
+    dom = get_domain("settlement_netting")
+    inst = reduce_to_settlement_instance(spec, 12)
+    idx = next(i for i, o in enumerate(inst.obligations) if o.id == "O_AB")
+    bits = [0] * inst.n_qubits
+    bits[idx] = 1
+    res = dom.evaluate_bits(inst, bits, method="qaoa_sim", kind="quantum", backend="sim")
+    assert res.feasible is False
+    assert set(res.allocation.x) == {"O_AB"}
+
+
 # --- QUBO -----------------------------------------------------------------
 
 
