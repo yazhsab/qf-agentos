@@ -1,0 +1,34 @@
+name: settlement-liquidity
+version: 0.1.0
+summary: >
+  Resolve payment-system gridlock with a liquidity-saving mechanism: select a
+  subset of queued interbank obligations to settle simultaneously (a netting
+  batch) that maximises settled value while keeping every participant's net
+  outflow within their available liquidity. Compares an exact classical MILP
+  against a QAOA-solved QUBO — in which each participant's liquidity inequality is
+  genuinely encoded via binary slack bits — on a reduced instance, and reports
+  whether quantum computing helps.
+problem: settlement_netting
+inputs:
+  - participants          # id, balance (available intraday liquidity)
+  - obligations           # id, payer, payee, amount, priority
+  - settlement_policy     # penalty_scale, optional min_settled_ratio
+methods:
+  classical:
+    - highs_settlement_lp
+    - highs_settlement_milp    # exact liquidity-saving batch
+    - qubo_exact_optimum
+    - simulated_annealing
+  quantum:
+    - qaoa_sim                 # objective + per-participant liquidity (slack-encoded)
+    - qaoa_pennylane
+    - qaoa_ibm                 # requires credentials (L3-gated)
+    - dwave_hybrid             # requires credentials (L3-gated)
+verification:
+  - liquidity                  # net outflow <= balance for every participant
+  - min_settled_ratio          # optional settled-value floor
+  - objective_recomputation
+  - quantum_contribution
+autonomy:
+  simulator: L2
+  paid_qpu: L3
