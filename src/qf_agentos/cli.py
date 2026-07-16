@@ -7,6 +7,7 @@ qf-agent skills                                          # list installed Quantu
 qf-agent backends                                        # list backends + availability (incl. qaoa_ibm)
 qf-agent arena --out arena/                              # benchmark every family — honest leaderboard
 qf-agent estimate --qubits 4                             # quantum amplitude estimation vs classical MC
+qf-agent simulability examples/collateral-allocation.yaml # tensor-network classical-simulability check
 qf-agent serve                                           # run the REST API (needs the server extra)
 """
 
@@ -328,6 +329,61 @@ def estimate(
         }
         (out / "estimate.json").write_text(json.dumps(payload, indent=2, default=str))
         console.print(f"Wrote {out}/estimate.json")
+    console.print(f"[dim]{_DISCLAIMER}[/]")
+
+
+@app.command()
+def simulability(
+    spec_path: Path = typer.Argument(..., exists=True, readable=True),
+    reps: int = typer.Option(1, help="QAOA reps."),
+    fidelity: float = typer.Option(0.99, help="Target MPS fidelity."),
+) -> None:
+    """Tensor-network baseline: is this problem's QAOA circuit classically simulable?"""
+    from .backends import quantum_available
+    from .core.domain import ProblemDomain
+    from .finance import get_domain
+    from .finance.tensor_network import qaoa_statevector, simulability_analysis
+
+    if not quantum_available():
+        console.print("[red]Needs qiskit: pip install 'qf-agentos[qiskit]'[/]")
+        raise typer.Exit(code=3)
+    spec = _load_spec_or_exit(spec_path)
+    domain = get_domain(spec.problem)
+    if not isinstance(domain, ProblemDomain):
+        console.print(
+            "[red]simulability applies to optimisation problems (QAOA), not this task.[/]"
+        )
+        raise typer.Exit(code=2)
+
+    pol = spec.execution_policy
+    inst = domain.reduce_to_instance(spec, pol.max_effective_qubits)
+    if getattr(inst, "degenerate", False):
+        console.print("[yellow]Degenerate instance — no quantum circuit to analyse.[/]")
+        return
+    slack = max(0, min(4, pol.max_effective_qubits - inst.n_qubits))
+    qubo = domain.build_qubo(inst, slack_bits=slack)
+    if qubo.n == 0 or qubo.n > 22:
+        console.print(f"[yellow]{qubo.n}-qubit instance outside the statevector budget.[/]")
+        return
+
+    console.rule(f"[bold]QF-AgentOS simulability[/] · {spec.problem} · {qubo.n} qubits")
+    a = simulability_analysis(qaoa_statevector(qubo, reps=reps), qubo.n, fidelity=fidelity)
+    table = Table(title="Tensor-network (MPS) classical-simulability analysis")
+    for col in ("metric", "value"):
+        table.add_column(col)
+    table.add_row("max entanglement entropy", f"{a['max_entanglement_entropy_bits']:.3f} bits")
+    table.add_row(
+        f"bond dimension for {fidelity:.0%} fidelity",
+        f"{a['bond_dimension_for_fidelity']} (exact-rank max {a['exact_max_bond_dimension']})",
+    )
+    table.add_row("truncated-MPS fidelity", f"{a['truncated_mps_fidelity']:.4f}")
+    table.add_row(
+        "MPS vs statevector params",
+        f"{a['mps_parameters']:,} vs {a['statevector_parameters']:,} ({a['compression_ratio']:.1f}×)",
+    )
+    table.add_row("classically simulable", "yes" if a["classically_simulable"] else "no")
+    console.print(table)
+    console.print(Panel(Text(a["verdict"]), title="Honest verdict", border_style="yellow"))
     console.print(f"[dim]{_DISCLAIMER}[/]")
 
 
