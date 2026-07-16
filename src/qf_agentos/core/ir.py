@@ -289,6 +289,12 @@ class ExecutionPolicy(BaseModel):
     shots: int = Field(default=4096, ge=128)
     seed: int = 7
 
+    # Where the gate-model QAOA runs. "sim" = local statevector (default, free,
+    # L2). "ibm" routes the FINAL optimised circuit to real IBM hardware via
+    # Qiskit Runtime — requires credentials, autonomy L3, human approval, and
+    # falls back to the simulator (with a note) if IBM is unavailable.
+    qpu_backend: Literal["sim", "ibm"] = "sim"
+
     # Noisy-simulation pass (completes the execution ladder). Off by default so
     # the ideal-vs-classical comparison and evidence digest are unchanged; when
     # on, the report shows how the QAOA result degrades on present-day hardware.

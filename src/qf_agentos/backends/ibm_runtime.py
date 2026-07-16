@@ -51,9 +51,11 @@ class IbmRuntimeQaoaSolver:
             circuit = isa_sim.assign_parameters(opt["best_params"]).copy()
             circuit.measure_all()
 
-            # 2. Sample ONLY the final circuit on real hardware.
+            # 2. Sample ONLY the final circuit on real hardware. The channel is
+            #    configurable (the legacy "ibm_quantum" channel was retired; the
+            #    current IBM Quantum Platform default is "ibm_quantum_platform").
             service = QiskitRuntimeService(
-                channel="ibm_quantum", token=token, instance=settings.ibm_instance
+                channel=settings.ibm_channel, token=token, instance=settings.ibm_instance
             )
             backend = (
                 service.backend(settings.ibm_backend)
