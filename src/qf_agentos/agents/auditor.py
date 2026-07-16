@@ -113,7 +113,8 @@ def auditor_agent(ctx: RunContext) -> str:
             rationale.append(
                 "This is surprising (MILP is exact) — flagging for independent reproduction."
             )
-            recommended = "qaoa_sim (pending reproduction)"
+            qmethod = qaoa.method if qaoa else "qaoa"
+            recommended = f"{qmethod} (pending reproduction)"
         elif abs(q_obj - c_obj) <= tol:
             category = DecisionCategory.QUANTUM_PARITY
             rationale.append("Quantum is feasible and matches the classical objective exactly —")
