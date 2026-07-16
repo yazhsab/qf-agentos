@@ -73,32 +73,47 @@ class IbmRuntimeQaoaSolver:
             job = sampler.run([isa_circuit], shots=config.shots)
             result = job.result()
             counts = result[0].data.meas.get_counts()
+
+            # Decode INSIDE the try so an empty/malformed histogram surfaces as a
+            # BackendError (the QuboSolver.solve contract), not a raw ValueError.
+            n = qubo.n
+            _validate_counts(counts, n)
+            best_key = min(counts, key=lambda k: qubo_energy(qubo, _bits(k, n)))
+            best_bits = _bits(best_key, n)
+            total_shots = sum(counts.values())
+            sample_mean = (
+                sum(qubo_energy(qubo, _bits(k, n)) * c for k, c in counts.items()) / total_shots
+            )
+            return QuboSolution(
+                best_bits=[int(b) for b in best_bits],
+                energy=qubo_energy(qubo, best_bits),
+                metadata={
+                    "backend": getattr(backend, "name", "ibm"),
+                    "shots": int(total_shots),
+                    # Shot histogram + mean energy so the Verification agent can assess
+                    # the quantum contribution, matching the simulator's metadata shape.
+                    "counts": dict(counts),
+                    "sample_mean_energy": float(sample_mean),
+                },
+                qpu_time_s=_extract_qpu_seconds(result, job),
+            )
         except BackendError:
             raise
         except Exception as exc:
             raise BackendError(f"IBM Runtime execution failed: {exc}") from exc
 
-        n = qubo.n
-        best_key = min(counts, key=lambda k: qubo_energy(qubo, _bits(k, n)))
-        best_bits = _bits(best_key, n)
-        qpu_time = _extract_qpu_seconds(result, job)
-        total_shots = sum(counts.values()) or 1
-        sample_mean = (
-            sum(qubo_energy(qubo, _bits(k, n)) * c for k, c in counts.items()) / total_shots
-        )
-        return QuboSolution(
-            best_bits=[int(b) for b in best_bits],
-            energy=qubo_energy(qubo, best_bits),
-            metadata={
-                "backend": getattr(backend, "name", "ibm"),
-                "shots": int(sum(counts.values())),
-                # Shot histogram + mean energy so the Verification agent can assess
-                # the quantum contribution, matching the simulator's metadata shape.
-                "counts": dict(counts),
-                "sample_mean_energy": float(sample_mean),
-            },
-            qpu_time_s=qpu_time,
-        )
+
+def _validate_counts(counts: dict[str, int], n: int) -> None:
+    """Reject an empty or wrong-width histogram with a BackendError (a silent
+    wrong-width decode would otherwise return a bogus solution)."""
+    if not counts:
+        raise BackendError("IBM returned an empty measurement histogram.")
+    for key in counts:
+        s = key.replace(" ", "")
+        if len(s) != n or any(ch not in "01" for ch in s):
+            raise BackendError(
+                f"IBM returned an unexpected bitstring '{key}' (expected {n} binary digits)."
+            )
 
 
 def _bits(key: str, n: int) -> np.ndarray:
@@ -123,7 +138,9 @@ def _extract_qpu_seconds(result: object, job: object | None = None) -> float:
         except Exception:
             pass
     try:
-        meta = result[0].metadata  # type: ignore[index]
+        # ExecutionSpans live at the TOP-level PrimitiveResult metadata
+        # (result.metadata), NOT the per-pub result[0].metadata.
+        meta = result.metadata  # type: ignore[attr-defined]
         spans = meta.get("execution", {}).get("execution_spans")
         if spans is not None and hasattr(spans, "duration"):
             return float(spans.duration)
