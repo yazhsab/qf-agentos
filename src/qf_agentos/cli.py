@@ -4,6 +4,7 @@ qf-agent solve   examples/collateral-allocation.yaml     # full pipeline + evide
 qf-agent explain examples/collateral-allocation.yaml     # L0: understand + formulate, no solving
 qf-agent plan    examples/collateral-allocation.yaml     # L1: experiment plan, no execution
 qf-agent skills                                          # list installed Quantum Skills
+qf-agent backends                                        # list backends + availability (incl. qaoa_ibm)
 qf-agent serve                                           # run the REST API (needs the server extra)
 """
 
@@ -191,6 +192,27 @@ def skills(extra_dir: Path = typer.Option(None, "--dir", help="Extra skills dire
             "yes" if s.get("_builtin") else "no",
         )
     console.print(table)
+
+
+@app.command()
+def backends() -> None:
+    """List quantum/classical backends and whether each is available right now."""
+    from .backends.registry import discover_capabilities
+
+    table = Table(title="Backends")
+    for col in ("name", "available", "detail"):
+        table.add_column(col)
+    for c in discover_capabilities():
+        table.add_row(
+            c.name,
+            "[green]yes[/]" if c.available else "[dim]no[/]",
+            escape(c.detail),
+        )
+    console.print(table)
+    console.print(
+        "[dim]Set QF_IBM_TOKEN (and QF_IBM_INSTANCE if needed) to enable qaoa_ibm; "
+        "real hardware also needs autonomy L3 + --approve.[/]"
+    )
 
 
 @app.command()
