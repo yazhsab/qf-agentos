@@ -56,6 +56,30 @@ def test_bond_dimension_monotonic_in_fidelity():
     assert bond_dimension_for_fidelity(sv, 0.4) <= bond_dimension_for_fidelity(sv, 0.99)
 
 
+def test_bond_dimension_never_exceeds_rank_at_fidelity_one():
+    # Regression: fidelity=1.0 must not return more than the Schmidt rank.
+    bell = np.array([1, 0, 0, 1], dtype=complex) / np.sqrt(2)
+    assert bond_dimension_for_fidelity(schmidt_values(bell, 2, 1), 1.0) <= 2
+    maxent = np.ones(16, dtype=complex) / 4.0  # near-maximal 4-qubit entanglement
+    sv = schmidt_values(maxent, 4, 2)
+    assert bond_dimension_for_fidelity(sv, 1.0) <= len(sv)
+
+
+def test_max_entangled_state_is_not_declared_mps_simulable():
+    # Regression / honesty: a maximally-entangled state must NOT be called
+    # "classically simulable by a tensor network" (the MPS is bigger than the
+    # statevector) and must not misattribute Vidal 2003.
+    rng = np.random.default_rng(0)
+    psi = rng.standard_normal(16) + 1j * rng.standard_normal(16)
+    a = simulability_analysis(psi, 4)
+    # High-entanglement state: the MPS is no smaller than the statevector, so no
+    # tensor-network advantage and no Vidal misattribution.
+    assert a["mps_compresses"] is False
+    assert a["classically_simulable"] is False
+    assert "Vidal" not in a["verdict"]
+    assert "no advantage over exact statevector" in a["verdict"]
+
+
 @pytest.mark.skipif(not quantum_available(), reason="qiskit not installed")
 @pytest.mark.slow
 def test_qaoa_statevector_simulability_runs():
