@@ -84,7 +84,11 @@ def auditor_agent(ctx: RunContext) -> str:
         )
         if qrep:
             bad = [c.name for c in qrep.checks if not c.satisfied]
-            rationale.append(f"Violated: {', '.join(bad)} — these were not encoded in the QUBO.")
+            rationale.append(
+                f"Violated: {', '.join(bad)}. The QUBO is a relaxation — some constraints are "
+                "dropped (verification-only) and others are only approximately penalised "
+                "(slack/penalty) — so its optimum can breach the exact constraints."
+            )
         rationale.append(
             "This is exactly the information lost in quantum encoding; classical wins."
         )
