@@ -160,10 +160,11 @@ def test_adapter_decodes_counts_with_mocked_runtime(monkeypatch, qubo):
 
     n = qubo.n
     counts = {"0" * n: 700, "1" + "0" * (n - 1): 300}
+    captured: dict[str, object] = {}
 
     class FakeService:
         def __init__(self, **kwargs):
-            self.kwargs = kwargs  # captures channel/token/instance
+            captured.update(kwargs)  # channel/token/instance actually passed
 
         def backend(self, _name):
             return SimpleNamespace(name="fake")
@@ -212,5 +213,10 @@ def test_adapter_decodes_counts_with_mocked_runtime(monkeypatch, qubo):
         assert len(sol.best_bits) == n
         assert sol.metadata["backend"] == "fake"
         assert sol.metadata["shots"] == 1000  # 700 + 300
+        # The configured channel + token actually reach the runtime service...
+        assert captured["channel"] == "ibm_cloud"
+        assert captured["token"] == "dummy-token"
+        # ...but the token must NEVER appear in the solution metadata (no leak).
+        assert "dummy-token" not in str(sol.metadata)
     finally:
         reset_settings_cache()
