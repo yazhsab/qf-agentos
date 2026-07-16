@@ -241,6 +241,20 @@ tests/            # 229 tests, ~92% coverage, mypy --strict
 - [Research note: QAE + tensor networks](docs/research-note-quantum-extras.md)
 - [Contributing & extension guide](CONTRIBUTING.md) · [Security & safety model](SECURITY.md) · [Changelog](CHANGELOG.md)
 
+### PDF (printable / shareable)
+
+Typeset editions of everything above live in [`docs/pdf/`](docs/pdf/):
+
+- **[QF-AgentOS-Documentation.pdf](docs/pdf/QF-AgentOS-Documentation.pdf)** — the complete manual (cover, contents, every doc)
+- **[QF-AgentOS-Findings.pdf](docs/pdf/QF-AgentOS-Findings.pdf)** — the results as a standalone report
+- One PDF per document alongside them.
+
+Rebuild after editing any Markdown (needs `pandoc` + a TeX distribution):
+
+```bash
+python3 scripts/build-pdfs.py
+```
+
 ## Disclaimer
 
 Experimental research software. Not investment advice, not a licensed advisor, and not

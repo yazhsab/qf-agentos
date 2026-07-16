@@ -168,6 +168,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
+# The PDF builder's glyph table maps these exact ambiguous characters to LaTeX maths;
+# substituting the ASCII look-alikes ruff suggests would defeat its purpose.
+"scripts/build-pdfs.py" = ["RUF001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["qf_agentos"]
