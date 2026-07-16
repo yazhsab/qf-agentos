@@ -105,6 +105,12 @@ def get_evidence_store(settings: Settings | None = None) -> EvidenceStoreProtoco
             tracking_uri=settings.mlflow_tracking_uri,
             experiment=settings.mlflow_experiment,
         )
+    if settings.registry_backend == "postgres":
+        from .postgres_store import PostgresEvidenceStore
+
+        if not settings.postgres_dsn:
+            raise RuntimeError("QF_REGISTRY_BACKEND=postgres requires QF_POSTGRES_DSN.")
+        return PostgresEvidenceStore(settings.postgres_dsn)
     return EvidenceStore(settings.evidence_dir)
 
 

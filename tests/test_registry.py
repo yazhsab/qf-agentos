@@ -77,6 +77,43 @@ def test_mlflow_round_trip(tmp_path):
     assert store.load_manifest("does-not-exist") is None
 
 
+def test_postgres_store_round_trip(tmp_path):
+    # Exercised against SQLite via SQLAlchemy — identical code path as Postgres.
+    pytest.importorskip("sqlalchemy")
+    from qf_agentos.governance.postgres_store import PostgresEvidenceStore
+
+    store = PostgresEvidenceStore(f"sqlite:///{tmp_path}/qf.db")
+    assert isinstance(store, EvidenceStoreProtocol)
+    run_id = "run-20260716-postgres"
+    store.save(run_id, _bundle())
+    store.save(run_id, _bundle())  # idempotent upsert (no duplicate row)
+
+    records = store.list_runs()
+    assert sum(1 for r in records if r.run_id == run_id) == 1
+    rec = next(r for r in records if r.run_id == run_id)
+    assert rec.decision == "CLASSICAL PREFERRED"
+    assert rec.recommended_method == "classical_milp"
+
+    manifest = store.load_manifest(run_id)
+    assert manifest is not None and manifest["evidence_digest"] == "abc123"
+    assert store.load_manifest("nope") is None
+
+
+def test_factory_returns_postgres_store_when_configured(tmp_path):
+    pytest.importorskip("sqlalchemy")
+    from qf_agentos.governance.postgres_store import PostgresEvidenceStore
+
+    store = get_evidence_store(
+        Settings(registry_backend="postgres", postgres_dsn=f"sqlite:///{tmp_path}/qf.db")
+    )
+    assert isinstance(store, PostgresEvidenceStore)
+
+
+def test_postgres_backend_requires_dsn():
+    with pytest.raises(RuntimeError, match="QF_POSTGRES_DSN"):
+        get_evidence_store(Settings(registry_backend="postgres", postgres_dsn=None))
+
+
 def test_env_selects_mlflow_backend(monkeypatch, tmp_path):
     pytest.importorskip("mlflow")
     from qf_agentos.governance.mlflow_store import MLflowEvidenceStore

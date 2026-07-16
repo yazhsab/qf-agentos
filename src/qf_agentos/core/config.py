@@ -41,11 +41,13 @@ class Settings(BaseSettings):
 
     # Governance / experiment registry
     evidence_dir: Path = Path("evidence")
-    # Where solved runs are persisted: "file" (default, dependency-free) or
-    # "mlflow" (requires the 'mlflow' extra) for a shared experiment registry.
-    registry_backend: Literal["file", "mlflow"] = "file"
+    # Where solved runs are persisted: "file" (default, dependency-free), "mlflow"
+    # (the 'mlflow' extra) for a shared experiment registry, or "postgres" (the
+    # 'postgres' extra) for a SQL database.
+    registry_backend: Literal["file", "mlflow", "postgres"] = "file"
     mlflow_tracking_uri: str | None = None  # None -> MLflow's default (./mlruns)
     mlflow_experiment: str = "qf-agentos"
+    postgres_dsn: str | None = None  # e.g. postgresql+psycopg://user:pass@host/db
 
     # API safety: reject specs larger than this over the (synchronous) REST path,
     # so a single unauthenticated request cannot drive a huge classical solve.

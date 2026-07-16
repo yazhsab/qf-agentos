@@ -47,6 +47,8 @@ dwave = ["dwave-ocean-sdk>=7.0"]
 server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 # MLflow experiment registry (alternative to the file-based evidence store)
 mlflow = ["mlflow>=2.9"]
+# Postgres (SQL) evidence registry
+postgres = ["sqlalchemy>=2.0", "psycopg[binary]>=3.1"]
 # OpenTelemetry tracing
 otel = ["opentelemetry-api>=1.24", "opentelemetry-sdk>=1.24"]
 # Everything an experimenter typically wants
