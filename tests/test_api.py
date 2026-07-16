@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 from qf_agentos.api import app
@@ -12,6 +14,18 @@ client = TestClient(app)
 
 def _spec_payload(**kwargs) -> dict:
     return make_spec(**kwargs).model_dump(mode="json")
+
+
+def _poll_job(job_id: str, *, timeout: float = 30.0, headers: dict | None = None) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = client.get(f"/jobs/{job_id}", headers=headers)
+        assert r.status_code == 200
+        body = r.json()
+        if body["status"] in ("succeeded", "failed"):
+            return body
+        time.sleep(0.05)
+    raise AssertionError(f"job {job_id} did not finish within {timeout}s")
 
 
 def test_healthz():
@@ -74,6 +88,63 @@ def test_solve_rejects_oversized_routing(monkeypatch):
         assert client.post("/solve", json=payload).status_code == 413  # 6 transactions > 3
     finally:
         reset_settings_cache()
+
+
+def test_async_job_lifecycle():
+    payload = {"spec": _spec_payload(required=4_000_000, allow_gate_model=False), "persist": False}
+    r = client.post("/jobs", json=payload)
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+    assert r.json()["status"] in ("queued", "running", "succeeded")
+
+    body = _poll_job(job_id)
+    assert body["status"] == "succeeded"
+    assert body["error"] is None
+    result = body["result"]
+    assert result["decision"]
+    assert result["evidence_digest"]
+    assert result["run_id"].startswith("run-")
+    assert body["finished_at"] >= body["started_at"] >= body["created_at"]
+
+
+def test_job_status_not_found():
+    assert client.get("/jobs/does-not-exist").status_code == 404
+
+
+def test_jobs_listing_returns_list():
+    r = client.get("/jobs")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_jobs_reject_oversized_spec(monkeypatch):
+    from qf_agentos.core.config import reset_settings_cache
+
+    monkeypatch.setenv("QF_API_MAX_INVENTORY", "3")
+    reset_settings_cache()
+    try:
+        r = client.post("/jobs", json={"spec": _spec_payload(allow_gate_model=False)})
+        assert r.status_code == 413
+    finally:
+        reset_settings_cache()
+
+
+def test_jobs_require_api_key_when_configured(monkeypatch):
+    from qf_agentos.api import _reset_rate_limiter
+    from qf_agentos.core.config import reset_settings_cache
+
+    monkeypatch.setenv("QF_API_KEYS", "k")
+    reset_settings_cache()
+    _reset_rate_limiter()
+    try:
+        payload = {"spec": _spec_payload(allow_gate_model=False), "persist": False}
+        assert client.post("/jobs", json=payload).status_code == 401
+        assert client.get("/jobs").status_code == 401
+        r = client.post("/jobs", json=payload, headers={"X-API-Key": "k"})
+        assert r.status_code == 202
+    finally:
+        reset_settings_cache()
+        _reset_rate_limiter()
 
 
 def test_runs_endpoint_returns_list():

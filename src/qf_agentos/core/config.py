@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     api_keys: str = Field(default="", description="Comma-separated API keys; empty = open.")
     api_rate_limit_per_minute: int = Field(default=60, gt=0)
 
+    # Async job queue behind POST /jobs (in-process thread pool; single instance).
+    api_job_workers: int = Field(default=2, gt=0, description="Concurrent solve workers.")
+    api_max_jobs: int = Field(default=256, gt=0, description="Retained job records (LRU).")
+
     # Credentials (never logged; loaded only when the matching backend runs)
     ibm_token: SecretStr | None = None
     ibm_instance: str | None = None

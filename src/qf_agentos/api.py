@@ -6,9 +6,11 @@ Requires the ``server`` extra.
 
 Solving is CPU-bound; endpoints are declared ``def`` (not ``async def``) so
 FastAPI runs them in a worker threadpool and the event loop stays responsive.
-For heavy production loads, put a task queue behind ``POST /solve``.
+``POST /solve`` runs synchronously (for quick specs); ``POST /jobs`` submits the
+same work to a bounded async queue and returns a job id to poll at
+``GET /jobs/{id}`` — the production path for long QAOA runs.
 
-Security: ``POST /solve`` and the run registry require an ``X-API-Key`` header
+Security: ``POST /solve``, ``POST /jobs`` and the run registry require an ``X-API-Key`` header
 when ``QF_API_KEYS`` is set (otherwise the API is open, for development, and a
 startup warning is logged). ``POST /solve`` is additionally rate-limited per
 client. Discovery endpoints (``/healthz``, ``/backends``, ``/skills``) are open.
@@ -16,6 +18,7 @@ client. Discovery endpoints (``/healthz``, ``/backends``, ``/skills``) are open.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
@@ -27,6 +30,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .api_jobs import JobManager, JobStatus
 from .backends.registry import discover_capabilities
 from .core.config import get_settings
 from .core.errors import QFAgentOSError
@@ -38,12 +42,36 @@ from .skills import load_skills
 
 _logger = get_logger("api")
 
+# Async job queue + a lock serialising evidence-store writes across worker threads.
+_jobs_manager: JobManager | None = None
+_jobs_lock = threading.Lock()
+_persist_lock = threading.Lock()
+
+
+def _jobs() -> JobManager:
+    global _jobs_manager
+    with _jobs_lock:
+        if _jobs_manager is None:
+            s = get_settings()
+            _jobs_manager = JobManager(workers=s.api_job_workers, max_jobs=s.api_max_jobs)
+        return _jobs_manager
+
+
+def _reset_jobs() -> None:
+    """Shut down and drop the job manager (used in tests)."""
+    global _jobs_manager
+    with _jobs_lock:
+        if _jobs_manager is not None:
+            _jobs_manager.shutdown()
+            _jobs_manager = None
+
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if not get_settings().auth_required():
         _logger.warning("API authentication is OPEN (set QF_API_KEYS to require an X-API-Key).")
     yield
+    _reset_jobs()
 
 
 app = FastAPI(
@@ -118,6 +146,22 @@ class SolveResponse(BaseModel):
     report_md: str | None = None
 
 
+class JobSubmitResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    problem: str
+    created_at: float
+    started_at: float | None = None
+    finished_at: float | None = None
+    error: str | None = None
+    result: SolveResponse | None = None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -153,12 +197,10 @@ def run_manifest(run_id: str, _identity: str = Depends(authenticate)) -> dict[st
     return manifest
 
 
-@app.post("/solve", response_model=SolveResponse)
-def solve(request: SolveRequest, _identity: str = Depends(rate_limit)) -> SolveResponse:
+def _check_size(spec: ProblemSpec) -> None:
+    """Bound the largest driver of solve cost over the API (413 if too big)."""
     settings = get_settings()
-    # Guard every problem family: bound the largest driver of solve cost
-    # (securities for collateral, transactions for routing) over the sync API.
-    n = max(len(request.spec.inventory), len(request.spec.transactions))
+    n = max(len(spec.inventory), len(spec.transactions), len(spec.obligations))
     if n > settings.api_max_inventory:
         raise HTTPException(
             status_code=413,
@@ -167,6 +209,10 @@ def solve(request: SolveRequest, _identity: str = Depends(rate_limit)) -> SolveR
                 f"{settings.api_max_inventory}. Use the CLI/SDK for larger problems."
             ),
         )
+
+
+def _execute_solve(request: SolveRequest) -> SolveResponse:
+    """Run the pipeline and build the response (shared by /solve and /jobs)."""
     try:
         ctx = solve_spec(request.spec, human_approved=request.approve)
     except QFAgentOSError as exc:
@@ -178,7 +224,8 @@ def solve(request: SolveRequest, _identity: str = Depends(rate_limit)) -> SolveR
         raise HTTPException(status_code=500, detail="pipeline produced no decision")
 
     if request.persist:
-        EvidenceStore(ctx.settings.evidence_dir).save(ctx.run_id, bundle)
+        with _persist_lock:  # serialise index.jsonl appends across worker threads
+            EvidenceStore(ctx.settings.evidence_dir).save(ctx.run_id, bundle)
 
     return SolveResponse(
         run_id=ctx.run_id,
@@ -191,3 +238,41 @@ def solve(request: SolveRequest, _identity: str = Depends(rate_limit)) -> SolveR
         manifest=bundle.manifest,
         report_md=bundle.report_md if request.include_report else None,
     )
+
+
+@app.post("/solve", response_model=SolveResponse)
+def solve(request: SolveRequest, _identity: str = Depends(rate_limit)) -> SolveResponse:
+    _check_size(request.spec)
+    return _execute_solve(request)
+
+
+@app.post("/jobs", response_model=JobSubmitResponse, status_code=202)
+def submit_job(request: SolveRequest, _identity: str = Depends(rate_limit)) -> JobSubmitResponse:
+    """Submit a solve to the async queue; poll GET /jobs/{id} for the result."""
+    _check_size(request.spec)
+
+    def _work() -> dict[str, Any]:
+        try:
+            return _execute_solve(request).model_dump()
+        except HTTPException as exc:
+            # Surface validation/pipeline errors as a failed job, not a 500.
+            raise RuntimeError(str(exc.detail)) from exc
+
+    job = _jobs().submit(_work, problem=request.spec.problem)
+    return JobSubmitResponse(job_id=job.id, status=job.status.value)
+
+
+@app.get("/jobs", response_model=list[JobStatusResponse])
+def list_jobs(_identity: str = Depends(authenticate)) -> list[JobStatusResponse]:
+    return [JobStatusResponse(**j.summary()) for j in _jobs().list()]
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def job_status(job_id: str, _identity: str = Depends(authenticate)) -> JobStatusResponse:
+    job = _jobs().get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"job '{job_id}' not found")
+    result = (
+        SolveResponse(**job.result) if job.status == JobStatus.SUCCEEDED and job.result else None
+    )
+    return JobStatusResponse(**job.summary(), result=result)
