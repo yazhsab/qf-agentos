@@ -39,8 +39,13 @@ class Settings(BaseSettings):
     statevector_qubit_limit: int = Field(default=22, gt=0)
     bruteforce_qubit_limit: int = Field(default=20, gt=0)
 
-    # Governance
+    # Governance / experiment registry
     evidence_dir: Path = Path("evidence")
+    # Where solved runs are persisted: "file" (default, dependency-free) or
+    # "mlflow" (requires the 'mlflow' extra) for a shared experiment registry.
+    registry_backend: Literal["file", "mlflow"] = "file"
+    mlflow_tracking_uri: str | None = None  # None -> MLflow's default (./mlruns)
+    mlflow_experiment: str = "qf-agentos"
 
     # API safety: reject specs larger than this over the (synchronous) REST path,
     # so a single unauthenticated request cannot drive a huge classical solve.

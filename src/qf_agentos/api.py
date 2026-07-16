@@ -36,7 +36,7 @@ from .core.config import get_settings
 from .core.errors import QFAgentOSError
 from .core.ir import ProblemSpec
 from .core.observability import get_logger
-from .governance.store import EvidenceStore
+from .governance.store import get_evidence_store
 from .pipeline import solve as solve_spec
 from .skills import load_skills
 
@@ -184,14 +184,12 @@ def skills() -> list[dict[str, Any]]:
 
 @app.get("/runs")
 def runs(_identity: str = Depends(authenticate)) -> list[dict[str, Any]]:
-    store = EvidenceStore(get_settings().evidence_dir)
-    return [r.__dict__ for r in store.list_runs()]
+    return [r.__dict__ for r in get_evidence_store().list_runs()]
 
 
 @app.get("/runs/{run_id}")
 def run_manifest(run_id: str, _identity: str = Depends(authenticate)) -> dict[str, Any]:
-    store = EvidenceStore(get_settings().evidence_dir)
-    manifest = store.load_manifest(run_id)
+    manifest = get_evidence_store().load_manifest(run_id)
     if manifest is None:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found")
     return manifest
@@ -225,7 +223,7 @@ def _execute_solve(request: SolveRequest) -> SolveResponse:
 
     if request.persist:
         with _persist_lock:  # serialise index.jsonl appends across worker threads
-            EvidenceStore(ctx.settings.evidence_dir).save(ctx.run_id, bundle)
+            get_evidence_store(ctx.settings).save(ctx.run_id, bundle)
 
     return SolveResponse(
         run_id=ctx.run_id,
