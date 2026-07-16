@@ -97,6 +97,9 @@ include = [
 ]
 
 [tool.hatch.build.targets.sdist]
+# The React frontend is a separate deployable (git repo only), not part of the
+# Python distribution — never let its node_modules leak into the sdist.
+exclude = ["studio-react"]
 include = [
   "src/qf_agentos",
   "tests",
