@@ -180,26 +180,17 @@ def test_adapter_decodes_counts_with_mocked_runtime(monkeypatch, qubo):
             )
             return [item]
 
+    sampler_modes: list[object] = []
+
     class FakeSampler:
         def __init__(self, mode=None):
-            pass
+            sampler_modes.append(mode)  # job mode passes the backend directly
 
         def run(self, _circuits, shots=None):
             return FakeJob()
 
-    class FakeSession:
-        def __init__(self, backend=None):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
     monkeypatch.setattr(qir, "QiskitRuntimeService", FakeService)
     monkeypatch.setattr(qir, "SamplerV2", FakeSampler)
-    monkeypatch.setattr(qir, "Session", FakeSession)
     monkeypatch.setattr(
         qiskit, "generate_preset_pass_manager", lambda **_kw: SimpleNamespace(run=lambda c: c)
     )
@@ -218,5 +209,8 @@ def test_adapter_decodes_counts_with_mocked_runtime(monkeypatch, qubo):
         assert captured["token"] == "dummy-token"
         # ...but the token must NEVER appear in the solution metadata (no leak).
         assert "dummy-token" not in str(sol.metadata)
+        # Job execution mode: the sampler is given the backend directly (NOT a
+        # Session) so it works on the free Open plan (which forbids sessions).
+        assert sampler_modes and sampler_modes[0].name == "fake"
     finally:
         reset_settings_cache()
