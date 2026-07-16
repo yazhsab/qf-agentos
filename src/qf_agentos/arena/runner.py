@@ -63,7 +63,7 @@ class ArenaResult:
 def _quantum_contribution(ctx: RunContext) -> bool | None:
     """The 'shot distribution beat random' signal, from whichever quantum ran."""
     reports = ctx.state.verification or {}
-    for method in ("qaoa_sim", "qaoa_ibm", "quantum_kernel_ridge"):
+    for method in ("qaoa_sim", "qaoa_ibm", "dwave_hybrid", "quantum_kernel_ridge"):
         rep = reports.get(method)
         if rep is not None and rep.quantum_contribution:
             return bool(rep.quantum_contribution.get("contributed"))

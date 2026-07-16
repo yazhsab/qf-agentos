@@ -123,7 +123,9 @@ def verification_agent(ctx: RunContext) -> str:
 
     # The QAOA sub-problem may have run on the simulator or on real hardware;
     # attribute the contribution to whichever quantum method is present.
-    quantum_method = next((m for m in ("qaoa_sim", "qaoa_ibm") if m in reports), None)
+    quantum_method = next(
+        (m for m in ("qaoa_sim", "qaoa_ibm", "dwave_hybrid") if m in reports), None
+    )
     if (
         st.qaoa_raw is not None
         and not st.qaoa_raw.degenerate

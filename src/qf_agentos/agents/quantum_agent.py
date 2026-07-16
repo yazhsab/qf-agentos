@@ -30,6 +30,7 @@ from ..finance import get_domain
 _TARGET_TO_BACKEND = {
     "gate_model_statevector_sim": "qaoa_sim",
     "gate_model_ibm_runtime": "qaoa_ibm",
+    "annealer_dwave_hybrid": "dwave_hybrid",
 }
 
 

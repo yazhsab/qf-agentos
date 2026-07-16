@@ -289,11 +289,12 @@ class ExecutionPolicy(BaseModel):
     shots: int = Field(default=4096, ge=128)
     seed: int = 7
 
-    # Where the gate-model QAOA runs. "sim" = local statevector (default, free,
-    # L2). "ibm" routes the FINAL optimised circuit to real IBM hardware via
-    # Qiskit Runtime — requires credentials, autonomy L3, human approval, and
-    # falls back to the simulator (with a note) if IBM is unavailable.
-    qpu_backend: Literal["sim", "ibm"] = "sim"
+    # Where the quantum sub-problem runs. "sim" = local statevector (default, free,
+    # L2). "ibm" routes the final optimised QAOA circuit to real IBM hardware; "dwave"
+    # solves the QUBO on the D-Wave Leap hybrid annealer. Both real backends require
+    # credentials + autonomy L3 + human approval, and fall back to the simulator (with
+    # a recorded reason) when unavailable.
+    qpu_backend: Literal["sim", "ibm", "dwave"] = "sim"
 
     # Noisy-simulation pass (completes the execution ladder). Off by default so
     # the ideal-vs-classical comparison and evidence digest are unchanged; when

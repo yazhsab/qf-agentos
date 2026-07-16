@@ -73,3 +73,28 @@ credentials are missing, it falls back to the simulator with a recorded reason.
 The evidence bundle records the real device name, the QPU time, and the decoded
 solution re-verified against the full constraints — alongside the classical MILP
 and the ideal simulator, so the comparison stays honest.
+
+## D-Wave (annealing)
+
+The same pattern works for the D-Wave Leap hybrid annealer, which solves the QUBO
+directly (no gate-model circuit):
+
+```bash
+pip install 'qf-agentos[dwave]'
+export QF_DWAVE_TOKEN='your-leap-token'   # free Leap tier: 1 min QPU/month
+qf-agent backends                          # dwave_hybrid should show available=true
+```
+
+```yaml
+execution_policy:
+  qpu_backend: dwave      # route the QUBO to the annealer
+  autonomy_level: L3
+  max_qpu_budget_usd: 5
+```
+
+```bash
+qf-agent solve examples/collateral-allocation.yaml --approve
+```
+
+Same gating (L3 + approval + budget), same honest re-verification; falls back to the
+simulator with a recorded reason if D-Wave is unavailable.

@@ -38,6 +38,7 @@ class DwaveHybridSolver:
 
         settings = get_settings()
         token = settings.dwave_token.get_secret_value() if settings.dwave_token else None
+        n = qubo.n
 
         try:
             bqm = dimod.BinaryQuadraticModel(vartype="BINARY")
@@ -49,22 +50,45 @@ class DwaveHybridSolver:
             bqm.offset = qubo.offset
 
             sampler = LeapHybridSampler(token=token)
-            sampleset = sampler.sample(bqm, label="qf-agentos collateral QUBO")
-            best = sampleset.first
+            sampleset = sampler.sample(bqm, label="qf-agentos QUBO")
+            backend_name = getattr(getattr(sampler, "solver", None), "name", "dwave_leap_hybrid")
+
+            # Build a shot histogram + mean energy from the sampleset so the
+            # Verification agent can assess the quantum contribution, matching the
+            # simulator/IBM metadata shape. Keys are big-endian (variable n-1 leftmost)
+            # to decode consistently with the verifier.
+            counts: dict[str, int] = {}
+            energy_sum = 0.0
+            shots = 0
+            for datum in sampleset.data(fields=["sample", "num_occurrences"]):
+                bits = [int(datum.sample[i]) for i in range(n)]
+                key = "".join(str(bits[i]) for i in range(n - 1, -1, -1))
+                occ = int(datum.num_occurrences)
+                counts[key] = counts.get(key, 0) + occ
+                energy_sum += qubo_energy(qubo, bits) * occ
+                shots += occ
+            if not counts:
+                raise BackendError("D-Wave returned no samples.")
+
+            best_bits = [int(sampleset.first.sample[i]) for i in range(n)]
+            qpu_time = float(sampleset.info.get("qpu_access_time", 0.0)) / 1e6  # us -> s
+            return QuboSolution(
+                best_bits=best_bits,
+                energy=qubo_energy(qubo, best_bits),
+                metadata={
+                    "backend": backend_name,
+                    "shots": shots,
+                    "counts": counts,
+                    "sample_mean_energy": float(energy_sum / (shots or 1)),
+                    "charge_time_s": sampleset.info.get("charge_time"),
+                    "run_time_s": sampleset.info.get("run_time"),
+                },
+                qpu_time_s=qpu_time,
+            )
+        except BackendError:
+            raise
         except Exception as exc:
             raise BackendError(f"D-Wave execution failed: {exc}") from exc
-
-        bits = [int(best.sample[i]) for i in range(qubo.n)]
-        qpu_time = float(sampleset.info.get("qpu_access_time", 0.0)) / 1e6  # us -> s
-        return QuboSolution(
-            best_bits=bits,
-            energy=qubo_energy(qubo, bits),
-            metadata={
-                "charge_time_s": sampleset.info.get("charge_time"),
-                "run_time_s": sampleset.info.get("run_time"),
-            },
-            qpu_time_s=qpu_time,
-        )
 
 
 __all__ = ["DwaveHybridSolver"]

@@ -33,6 +33,10 @@ def hardware_planner_agent(ctx: RunContext) -> str:
     caps = discover_capabilities()
     gate_sim_available = any(c.name == "qaoa_sim" and c.available for c in caps)
 
+    def _available(name: str) -> bool:
+        cap = next((c for c in caps if c.name == name), None)
+        return cap is not None and cap.available
+
     total_qubits = qubo.n
     n_pairs = sum(1 for (i, j) in qubo.Q if i != j)
     density = (2 * n_pairs) / max(1, total_qubits * (total_qubits - 1))
@@ -52,6 +56,10 @@ def hardware_planner_agent(ctx: RunContext) -> str:
         reasons.append(
             f"{total_qubits} qubits exceeds policy max_effective_qubits={pol.max_effective_qubits}"
         )
+    elif pol.qpu_backend == "dwave" and pol.allow_quantum_annealing and _available("dwave_hybrid"):
+        # The annealer solves the reduced QUBO directly — no gate-model simulator or
+        # statevector budget applies. L3 + approval + budget still gate the call site.
+        target = "annealer_dwave_hybrid"
     elif not pol.allow_gate_model:
         abstain = True
         reasons.append("policy disallows the gate model; no annealer credentials configured")
@@ -72,7 +80,9 @@ def hardware_planner_agent(ctx: RunContext) -> str:
     # later by the policy engine at the actual call site (RUN_PAID_QPU).
     real_qpu = "not attempted (requires credentials + L3 approval + budget)"
     estimated_cost = 0.0
-    if target == "gate_model_statevector_sim" and pol.qpu_backend == "ibm":
+    if target == "annealer_dwave_hybrid":
+        real_qpu = "D-Wave Leap hybrid annealer (solves the QUBO directly)"
+    elif target == "gate_model_statevector_sim" and pol.qpu_backend == "ibm":
         ibm_cap = next((c for c in caps if c.name == "qaoa_ibm"), None)
         if ibm_cap is not None and ibm_cap.available:
             target = "gate_model_ibm_runtime"
@@ -86,6 +96,14 @@ def hardware_planner_agent(ctx: RunContext) -> str:
                 f"qpu_backend='ibm' requested but IBM is unavailable ({detail}); "
                 "running on the local simulator instead."
             )
+    # D-Wave requested but unavailable, and we didn't abstain -> note the sim fallback.
+    if pol.qpu_backend == "dwave" and target != "annealer_dwave_hybrid" and not abstain:
+        dcap = next((c for c in caps if c.name == "dwave_hybrid"), None)
+        detail = dcap.detail if dcap is not None else "dwave_hybrid not registered"
+        reasons.append(
+            f"qpu_backend='dwave' requested but D-Wave is unavailable ({detail}); "
+            "running on the local simulator instead."
+        )
 
     est_two_qubit_depth = int(pol.qaoa_reps * n_pairs / max(1, total_qubits / 2))
 
