@@ -17,7 +17,9 @@ pip install 'qf-agentos[ibm]'   # qiskit + qiskit-aer + qiskit-ibm-runtime
 ```
 
 You need an **IBM Quantum Platform** account and an API key
-(<https://quantum.ibm.com/>). The free **Open Plan** works.
+(<https://quantum.ibm.com/>). The free **Open Plan** works — QF-AgentOS samples the
+final circuit in **job execution mode**, which the Open plan allows (it forbids
+interactive *session* mode).
 
 ## 2. Provide the credential — as an environment variable, never in a file
 

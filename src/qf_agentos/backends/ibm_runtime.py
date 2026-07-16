@@ -37,7 +37,7 @@ class IbmRuntimeQaoaSolver:
             raise BackendUnavailableError(self.name, detail)
 
         from qiskit import generate_preset_pass_manager
-        from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2, Session
+        from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
 
         from .quantum import optimize_qaoa
 
@@ -65,10 +65,13 @@ class IbmRuntimeQaoaSolver:
             pm = generate_preset_pass_manager(backend=backend, optimization_level=1)
             isa_circuit = pm.run(circuit)
 
-            with Session(backend=backend) as session:
-                sampler = SamplerV2(mode=session)
-                job = sampler.run([isa_circuit], shots=config.shots)
-                result = job.result()
+            # Job execution mode (mode=backend): a single self-contained job. This
+            # works on every plan, including the free Open plan, which forbids
+            # Session/interactive mode (error 1352). We only sample one circuit, so
+            # a session buys nothing here.
+            sampler = SamplerV2(mode=backend)
+            job = sampler.run([isa_circuit], shots=config.shots)
+            result = job.result()
             counts = result[0].data.meas.get_counts()
         except BackendError:
             raise
