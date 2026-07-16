@@ -81,7 +81,7 @@ class IbmRuntimeQaoaSolver:
         n = qubo.n
         best_key = min(counts, key=lambda k: qubo_energy(qubo, _bits(k, n)))
         best_bits = _bits(best_key, n)
-        qpu_time = _extract_qpu_seconds(result)
+        qpu_time = _extract_qpu_seconds(result, job)
         total_shots = sum(counts.values()) or 1
         sample_mean = (
             sum(qubo_energy(qubo, _bits(k, n)) * c for k, c in counts.items()) / total_shots
@@ -106,12 +106,30 @@ def _bits(key: str, n: int) -> np.ndarray:
     return np.array([int(s[n - 1 - i]) for i in range(n)], dtype=int)
 
 
-def _extract_qpu_seconds(result: object) -> float:
+def _extract_qpu_seconds(result: object, job: object | None = None) -> float:
+    """Best-effort real QPU/quantum seconds. Prefers the job's billed usage, then
+    the result's execution spans; returns 0.0 if neither is available (the API
+    shape varies by qiskit-ibm-runtime version, so every access is guarded)."""
+    if job is not None and hasattr(job, "usage"):
+        try:
+            usage = job.usage()
+            if isinstance(usage, int | float):
+                return float(usage)
+            if isinstance(usage, dict):
+                for key in ("quantum_seconds", "seconds", "usage"):
+                    val = usage.get(key)
+                    if isinstance(val, int | float):
+                        return float(val)
+        except Exception:
+            pass
     try:
         meta = result[0].metadata  # type: ignore[index]
-        return float(meta.get("execution", {}).get("execution_spans", 0.0) or 0.0)
+        spans = meta.get("execution", {}).get("execution_spans")
+        if spans is not None and hasattr(spans, "duration"):
+            return float(spans.duration)
     except Exception:
-        return 0.0
+        pass
+    return 0.0
 
 
 __all__ = ["IbmRuntimeQaoaSolver"]

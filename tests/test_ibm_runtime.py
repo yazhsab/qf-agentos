@@ -146,6 +146,11 @@ def test_ibm_route_runs_with_l3_approval(monkeypatch):
         assert not ctx.state.errors
         qrep = ctx.state.verification.get("qaoa_ibm")
         assert qrep is not None and qrep.quantum_contribution is not None
+        # The auditor panel must read the SAME contribution the verifier attached to
+        # qaoa_ibm (regression: it used to look only at qaoa_sim and show False).
+        verif_contributed = qrep.quantum_contribution["contributed"]
+        assert f"Quantum contribution   : {verif_contributed}" in ctx.state.audit.rendered
+        assert "real hardware · fake_ibm_device" in ctx.state.audit.rendered
     finally:
         reset_settings_cache()
 

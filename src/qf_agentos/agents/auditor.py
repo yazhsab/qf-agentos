@@ -36,7 +36,8 @@ def auditor_agent(ctx: RunContext) -> str:
     problem_infeasible = milp_full is not None and not milp_full.feasible
 
     crep = reports.get("instance_milp")
-    qrep = reports.get("qaoa_sim")
+    # The QAOA sub-problem runs on the simulator or on real hardware; read whichever.
+    qrep = reports.get("qaoa_sim") or reports.get("qaoa_ibm")
     c_feasible = crep.feasible if crep else (inst_milp.feasible if inst_milp else False)
     c_obj = crep.recomputed_objective if crep else (inst_milp.objective if inst_milp else None)
     q_feasible = qrep.feasible if qrep else (qaoa.feasible if qaoa else False)
