@@ -293,7 +293,7 @@ def estimate(
     inst = make_normal_loss_instance(qubits, tail_threshold=tail)
     console.rule(f"[bold]QF-AgentOS estimate[/] · {inst.label} · {qubits} qubits")
     r = mlae(inst, shots=shots, seed=seed)
-    mc, se = classical_monte_carlo(inst, r.oracle_calls, seed=seed)
+    mc, _ = classical_monte_carlo(inst, r.oracle_calls, seed=seed)
     ra = resource_analysis(inst)
 
     table = Table(title=f"Amplitude estimation — {inst.label}")
@@ -308,7 +308,7 @@ def estimate(
     console.print(
         f"[dim]QAE query complexity O(1/ε) vs MC O(1/ε²): for RMSE {ra['target_rmse']:.0e}, "
         f"{ra['qae_oracle_queries']:,} vs {ra['classical_mc_samples']:,} queries "
-        f"({ra['quadratic_query_ratio']:.0f}× fewer) — but state prep is "
+        f"({ra['quadratic_query_ratio']:.0f}x fewer) - but state prep is "
         f"{ra['state_preparation_gates']:,} gates (O(2^m)).[/]"
     )
     console.print(Panel(Text(ra["verdict"]), title="Honest verdict", border_style="yellow"))
@@ -379,7 +379,7 @@ def simulability(
     table.add_row("truncated-MPS fidelity", f"{a['truncated_mps_fidelity']:.4f}")
     table.add_row(
         "MPS vs statevector params",
-        f"{a['mps_parameters']:,} vs {a['statevector_parameters']:,} ({a['compression_ratio']:.1f}×)",
+        f"{a['mps_parameters']:,} vs {a['statevector_parameters']:,} ({a['compression_ratio']:.1f}x)",
     )
     table.add_row("classically simulable", "yes" if a["classically_simulable"] else "no")
     console.print(table)
