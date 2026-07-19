@@ -60,7 +60,9 @@ dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
   "hypothesis>=6.100",
-  "ruff>=0.5",
+  # Cap ruff to a minor: it adds lint rules in minor releases, and an unpinned
+  # bump silently turned CI red (UP042) with no code change. Bump deliberately.
+  "ruff>=0.15,<0.16",
   "mypy>=1.10",
   "types-PyYAML>=6.0",
   "httpx>=0.27",
@@ -164,6 +166,9 @@ ignore = [
   "E501",   # line length handled by formatter
   "B008",   # typer uses function calls in argument defaults by design
   "RUF012", # mutable class attrs (pydantic models manage this)
+  "UP042",  # `class X(str, Enum)` is deliberate, not to be rewritten to StrEnum:
+            # StrEnum changes str()/format semantics, which would alter how these
+            # enums serialize and could break the byte-identical evidence_digest.
 ]
 
 [tool.ruff.lint.per-file-ignores]
