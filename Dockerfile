@@ -6,11 +6,14 @@ WORKDIR /build
 RUN pip install --no-cache-dir build
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
+# The wheel force-includes examples/ (bundled as Studio presets), so the build
+# needs them present in the builder context — not just the runtime stage below.
+COPY examples ./examples
 RUN python -m build --wheel
 
 FROM python:3.12-slim AS runtime
 LABEL org.opencontainers.image.title="QF-AgentOS" \
-      org.opencontainers.image.source="https://github.com/qf-agentos/qf-agentos" \
+      org.opencontainers.image.source="https://github.com/yazhsab/qf-agentos" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 ENV PYTHONUNBUFFERED=1 \
