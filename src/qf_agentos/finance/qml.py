@@ -102,7 +102,7 @@ def standardize(train_X: FloatArray, X: FloatArray) -> FloatArray:
     mean = train_X.mean(axis=0)
     std = train_X.std(axis=0)
     std[std == 0] = 1.0
-    return (X - mean) / std
+    return np.asarray((X - mean) / std, dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ def standardize(train_X: FloatArray, X: FloatArray) -> FloatArray:
 
 def rbf_kernel(A: FloatArray, B: FloatArray, gamma: float) -> FloatArray:
     sq = np.sum(A**2, axis=1)[:, None] + np.sum(B**2, axis=1)[None, :] - 2.0 * A @ B.T
-    return np.exp(-gamma * np.maximum(sq, 0.0))
+    return np.asarray(np.exp(-gamma * np.maximum(sq, 0.0)), dtype=np.float64)
 
 
 def quantum_fidelity_kernel(
@@ -150,7 +150,7 @@ def krr_fit(k_train: FloatArray, y01: NDArray[np.int_], lam: float) -> FloatArra
     """Solve (K + lam I) alpha = y, with y in {-1, +1}."""
     y = 2.0 * y01.astype(float) - 1.0
     n = k_train.shape[0]
-    return np.linalg.solve(k_train + lam * np.eye(n), y)
+    return np.asarray(np.linalg.solve(k_train + lam * np.eye(n), y), dtype=np.float64)
 
 
 def krr_scores(k_test_train: FloatArray, alpha: FloatArray) -> FloatArray:

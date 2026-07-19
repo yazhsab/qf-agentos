@@ -63,7 +63,9 @@ dev = [
   # Cap ruff to a minor: it adds lint rules in minor releases, and an unpinned
   # bump silently turned CI red (UP042) with no code change. Bump deliberately.
   "ruff>=0.15,<0.16",
-  "mypy>=1.10",
+  # Cap mypy too: a minor bump + newer numpy stubs turned CI red with no code
+  # change. The qml.py returns are now dtype-explicit so they hold across stubs.
+  "mypy>=2.3,<3",
   "types-PyYAML>=6.0",
   "httpx>=0.27",
   "build>=1.2",
@@ -203,6 +205,11 @@ module = [
   "dwave.*",
   "dimod.*",
   "scipy.*",
+  # Optional extras, imported lazily under try/except (otel / mlflow / postgres).
+  # Not installed by [all,dev], so CI's mypy can't see them — same as the above.
+  "opentelemetry.*",
+  "mlflow.*",
+  "sqlalchemy.*",
 ]
 ignore_missing_imports = true
 
